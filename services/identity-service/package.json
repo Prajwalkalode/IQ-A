@@ -6,8 +6,11 @@
     "dev": "nodemon local-server.js"
   },
   "dependencies": {
+    "bcrypt": "^6.0.0",
     "dotenv": "^18.0.1",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.10.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
