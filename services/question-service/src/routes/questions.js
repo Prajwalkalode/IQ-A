@@ -50,6 +50,21 @@ router.get('/internal/random', internalOnly, async (req, res) => {
 	}
 });
 
+router.get('/internal/count', internalOnly, async (req, res) => {
+	try {
+		const filter = {};
+		if (typeof req.query.topic === 'string' && req.query.topic.trim()) {
+			filter.topic = req.query.topic.trim().toLowerCase();
+		}
+
+		const available = await Question.countDocuments(filter);
+		return res.status(200).json({ available });
+	} catch (error) {
+		console.error('Failed to count questions', error);
+		return res.status(500).json({ error: 'Internal server error' });
+	}
+});
+
 router.post('/internal/answers', internalOnly, async (req, res) => {
 	try {
 		const { ids } = req.body || {};
