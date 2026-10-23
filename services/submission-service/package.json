@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "start": "node local-server.js",
-    "dev": "nodemon local-server.js"
+    "dev": "nodemon local-server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "dotenv": "^18.0.1",
