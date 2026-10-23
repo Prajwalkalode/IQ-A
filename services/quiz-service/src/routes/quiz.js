@@ -106,6 +106,32 @@ router.post('/internal/assignment/complete', internalOnly, async (req, res) => {
 	}
 });
 
+router.get('/internal/session', internalOnly, async (req, res) => {
+	try {
+		const quizId = normalize(req.query.quizId);
+		if (!quizId) {
+			return res.status(400).json({ error: 'quizId is required' });
+		}
+
+		const session = await QuizSession.findOne({ quizId })
+			.select('quizId createdBy questionCount revealScore isActive')
+			.lean();
+		if (!session) {
+			return res.status(404).json({ error: 'Quiz not found' });
+		}
+
+		return res.status(200).json({
+			quizId: session.quizId,
+			createdBy: session.createdBy,
+			questionCount: session.questionCount,
+			revealScore: session.revealScore,
+			isActive: session.isActive,
+		});
+	} catch (error) {
+		return sendRouteError(res, error, 'Failed to retrieve quiz session');
+	}
+});
+
 router.post('/', ...quizManager, async (req, res) => {
 	try {
 		const body = req.body || {};
