@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const express = require('express');
 const jwt = require('jsonwebtoken');
 const { after, before, beforeEach, describe, it } = require('node:test');
 
@@ -7,8 +8,6 @@ process.env.INTERNAL_API_KEY = 'quiz-service-test-internal-key';
 
 const QuizAssignment = require('../src/models/QuizAssignment');
 const QuizSession = require('../src/models/QuizSession');
-const Question = require('../../question-service/src/models/Question');
-const questionApp = require('../../question-service/src/app');
 const app = require('../src/app');
 const { request, startServer } = require('../http-helper');
 
@@ -17,6 +16,7 @@ const assignments = [];
 let bankQuestions = [];
 let server;
 let questionServer;
+let upstreamError = false;
 
 function matches(document, filter) {
 	return Object.entries(filter).every(
@@ -39,16 +39,36 @@ function query(value) {
 	};
 }
 
-Question.countDocuments = async (filter = {}) =>
-	bankQuestions.filter((question) => !filter.topic || question.topic === filter.topic).length;
-Question.aggregate = async (pipeline) => {
-	const filter = pipeline.find((stage) => stage.$match)?.$match || {};
-	const size = pipeline.find((stage) => stage.$sample).$sample.size;
-	return bankQuestions
-		.filter((question) => !filter.topic || question.topic === filter.topic)
-		.slice(0, size)
-		.map(({ _id, text, options }) => ({ _id, text, options }));
-};
+function matchingQuestions(topic) {
+	return bankQuestions.filter((question) => !topic || question.topic === topic);
+}
+
+const questionApp = express();
+questionApp.use((req, res, next) => {
+	if (req.get('x-internal-key') !== process.env.INTERNAL_API_KEY) {
+		return res.status(401).json({ error: 'Unauthorized' });
+	}
+	if (upstreamError) {
+		return res.status(503).json({ error: 'Unavailable' });
+	}
+	return next();
+});
+questionApp.get('/questions/internal/count', (req, res) => {
+	return res.status(200).json({ available: matchingQuestions(req.query.topic).length });
+});
+questionApp.get('/questions/internal/random', (req, res) => {
+	const count = Number(req.query.count);
+	const available = matchingQuestions(req.query.topic).length;
+	const response = {
+		questions: matchingQuestions(req.query.topic)
+			.slice(0, count)
+			.map(({ _id, text, options }) => ({ _id, text, options })),
+	};
+	if (available < count) {
+		response.available = available;
+	}
+	return res.status(200).json(response);
+});
 
 QuizSession.prototype.save = async function () {
 	await this.validate();
@@ -138,7 +158,9 @@ describe('quiz-service HTTP routes', () => {
 	beforeEach(() => {
 		sessions.length = 0;
 		assignments.length = 0;
-		bankQuestions = Array.from({ length: 10 }, (_, index) => new Question({
+		upstreamError = false;
+		bankQuestions = Array.from({ length: 10 }, (_, index) => ({
+			_id: `question-${index + 1}`,
 			text: `Question ${index + 1}`,
 			options: ['A', 'B'],
 			correctIndex: index % 2,
@@ -180,7 +202,8 @@ describe('quiz-service HTTP routes', () => {
 		});
 		assert.equal(invalid.status, 400);
 
-		bankQuestions = Array.from({ length: 10 }, (_, index) => new Question({
+		bankQuestions = Array.from({ length: 10 }, (_, index) => ({
+			_id: `question-${index + 1}`,
 			text: `Question ${index + 1}`,
 			options: ['A', 'B'],
 			correctIndex: index % 2,
@@ -211,7 +234,7 @@ describe('quiz-service HTTP routes', () => {
 		});
 		assert.equal(duplicate.status, 409);
 
-		process.env.QUESTION_SERVICE_URL = 'http://127.0.0.1:1';
+		upstreamError = true;
 		const upstream = await request(server.baseUrl, '/quiz', {
 			method: 'POST',
 			token: teacherToken,
@@ -219,7 +242,7 @@ describe('quiz-service HTTP routes', () => {
 		});
 		assert.equal(upstream.status, 502);
 		assert.deepEqual(upstream.body, { error: 'Question service unavailable' });
-		process.env.QUESTION_SERVICE_URL = questionServer.baseUrl;
+		upstreamError = false;
 	});
 
 	it('enforces teacher ownership and protects quizzes with assignments from deletion', async () => {
@@ -274,13 +297,14 @@ describe('quiz-service HTTP routes', () => {
 		assert.equal(started.body.questions.length, 2);
 		assert.ok(started.body.questions.every((question) => !('correctIndex' in question)));
 
-		bankQuestions = [new Question({
+		bankQuestions = [{
+			_id: 'different-question',
 			text: 'Different',
 			options: ['X', 'Y'],
 			correctIndex: 0,
 			topic: 'math',
 			createdBy: 'teacher@example.com',
-		})];
+		}];
 		const refreshed = await request(server.baseUrl, '/quiz/start-quiz/start', {
 			method: 'POST',
 			token: studentToken,
