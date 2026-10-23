@@ -38,7 +38,6 @@ router.post('/signup', async (req, res) => {
 
 router.post('/login', async (req, res) => {
 	const { email, password } = req.body;
-    console.log(email);
 
 	if (!email || !password) {
 		return res.status(401).json({ error: 'Invalid credentials' });
