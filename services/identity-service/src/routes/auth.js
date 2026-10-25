@@ -62,7 +62,7 @@ router.post('/login', async (req, res) => {
 		);
 
 		return res.status(200).json({ token });
-	} catch (error) {
+	} catch {
 		return res.status(500).json({ error: 'Internal server error' });
 	}
 });
