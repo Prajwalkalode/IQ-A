@@ -1,7 +1,12 @@
 const express = require('express');
-const mongoose = require('mongoose');
-const QuizAssignment = require('../models/QuizAssignment');
-const QuizSession = require('../models/QuizSession');
+const { ZodError } = require('zod');
+const quizAssignmentRepository = require('../repositories/quizAssignmentRepository');
+const quizSessionRepository = require('../repositories/quizSessionRepository');
+const {
+	quizAssignmentSchema,
+	quizSessionSchema,
+	quizSessionUpdateSchema,
+} = require('../schemas/quizSchemas');
 const internalOnly = require('../middleware/internalOnly');
 const requireRole = require('../middleware/requireRole');
 const verifyToken = require('../middleware/verifyToken');
@@ -16,14 +21,14 @@ function normalize(value) {
 }
 
 function isDuplicateKeyError(error) {
-	return error && error.code === 11000;
+	return (
+		error &&
+		(error.name === 'ConditionalCheckFailedException' || error.code === 11000)
+	);
 }
 
 function isValidationError(error) {
-	return (
-		error instanceof mongoose.Error.ValidationError ||
-		error instanceof mongoose.Error.CastError
-	);
+	return error instanceof ZodError;
 }
 
 function sendRouteError(res, error, context) {
@@ -59,12 +64,15 @@ router.get('/internal/assignment', internalOnly, async (req, res) => {
 			return res.status(400).json({ error: 'quizId and studentEmail are required' });
 		}
 
-		const assignment = await QuizAssignment.findOne({ quizId, studentEmail });
+		const assignment = await quizAssignmentRepository.findByQuizAndStudent(
+			quizId,
+			studentEmail,
+		);
 		if (!assignment) {
 			return res.status(404).json({ error: 'Assignment not found' });
 		}
 
-		const session = await QuizSession.findOne({ quizId }).select('revealScore').lean();
+		const session = await quizSessionRepository.findByQuizId(quizId);
 		if (!session) {
 			return res.status(404).json({ error: 'Assignment not found' });
 		}
@@ -89,11 +97,7 @@ router.post('/internal/assignment/complete', internalOnly, async (req, res) => {
 			return res.status(400).json({ error: 'quizId and studentEmail are required' });
 		}
 
-		const assignment = await QuizAssignment.findOneAndUpdate(
-			{ quizId, studentEmail, status: 'assigned' },
-			{ $set: { status: 'completed', completedAt: new Date() } },
-			{ new: true, runValidators: true },
-		);
+		const assignment = await quizAssignmentRepository.complete(quizId, studentEmail);
 		if (!assignment) {
 			return res.status(409).json({
 				error: 'Assignment not found or already completed',
@@ -113,9 +117,7 @@ router.get('/internal/session', internalOnly, async (req, res) => {
 			return res.status(400).json({ error: 'quizId is required' });
 		}
 
-		const session = await QuizSession.findOne({ quizId })
-			.select('quizId createdBy questionCount revealScore isActive')
-			.lean();
+		const session = await quizSessionRepository.findByQuizId(quizId);
 		if (!session) {
 			return res.status(404).json({ error: 'Quiz not found' });
 		}
@@ -135,14 +137,13 @@ router.get('/internal/session', internalOnly, async (req, res) => {
 router.post('/', ...quizManager, async (req, res) => {
 	try {
 		const body = req.body || {};
-		const session = new QuizSession({
+		const session = quizSessionSchema.parse({
 			quizId: normalize(body.quizId),
 			questionCount: body.questionCount,
 			revealScore: body.revealScore,
 			topic: normalize(body.topic) || undefined,
 			createdBy: req.user.email,
 		});
-		await session.validate();
 
 		const available = await countQuestions(session.topic);
 		if (available < session.questionCount) {
@@ -153,8 +154,8 @@ router.post('/', ...quizManager, async (req, res) => {
 			});
 		}
 
-		await session.save();
-		return res.status(201).json(session);
+		const createdSession = await quizSessionRepository.create(session);
+		return res.status(201).json(createdSession);
 	} catch (error) {
 		if (isDuplicateKeyError(error)) {
 			return res.status(409).json({ error: 'Quiz ID already exists' });
@@ -166,8 +167,10 @@ router.post('/', ...quizManager, async (req, res) => {
 
 router.get('/', ...quizManager, async (req, res) => {
 	try {
-		const filter = req.user.role === 'admin' ? {} : { createdBy: req.user.email };
-		const sessions = await QuizSession.find(filter).sort({ createdAt: -1 });
+		const sessions =
+			req.user.role === 'admin'
+				? await quizSessionRepository.listAll()
+				: await quizSessionRepository.listByCreator(req.user.email);
 		return res.status(200).json(sessions);
 	} catch (error) {
 		return sendRouteError(res, error, 'Failed to list quizzes');
@@ -177,7 +180,7 @@ router.get('/', ...quizManager, async (req, res) => {
 router.post('/:quizId/start', ...studentOnly, async (req, res) => {
 	try {
 		const quizId = normalize(req.params.quizId);
-		const session = await QuizSession.findOne({ quizId });
+		const session = await quizSessionRepository.findByQuizId(quizId);
 		if (!session) {
 			return res.status(404).json({ error: 'Quiz not found' });
 		}
@@ -186,7 +189,8 @@ router.post('/:quizId/start', ...studentOnly, async (req, res) => {
 		}
 
 		const studentEmail = normalize(req.user.email);
-		const existingAssignment = await QuizAssignment.findOne({ quizId, studentEmail });
+		const existingAssignment =
+			await quizAssignmentRepository.findByQuizAndStudent(quizId, studentEmail);
 		if (existingAssignment) {
 			if (existingAssignment.status === 'completed') {
 				return res.status(409).json({ error: 'Quiz already completed' });
@@ -207,21 +211,22 @@ router.post('/:quizId/start', ...studentOnly, async (req, res) => {
 			text,
 			options,
 		}));
-		const assignment = new QuizAssignment({
+		const assignment = quizAssignmentSchema.parse({
 			quizId,
 			studentEmail,
 			questions,
 		});
 
 		try {
-			await assignment.save();
+			await quizAssignmentRepository.create(assignment);
 			return res.status(201).json(assignmentResponse(assignment));
 		} catch (error) {
 			if (!isDuplicateKeyError(error)) {
 				throw error;
 			}
 
-			const concurrentAssignment = await QuizAssignment.findOne({ quizId, studentEmail });
+			const concurrentAssignment =
+				await quizAssignmentRepository.findByQuizAndStudent(quizId, studentEmail);
 			if (!concurrentAssignment) {
 				throw error;
 			}
@@ -238,13 +243,10 @@ router.post('/:quizId/start', ...studentOnly, async (req, res) => {
 
 router.get('/:quizId', ...quizManager, async (req, res) => {
 	try {
-		const filter = { quizId: normalize(req.params.quizId) };
-		if (req.user.role !== 'admin') {
-			filter.createdBy = req.user.email;
-		}
-
-		const session = await QuizSession.findOne(filter);
-		if (!session) {
+		const session = await quizSessionRepository.findByQuizId(
+			normalize(req.params.quizId),
+		);
+		if (!session || (req.user.role !== 'admin' && session.createdBy !== req.user.email)) {
 			return res.status(404).json({ error: 'Quiz not found' });
 		}
 
@@ -257,7 +259,7 @@ router.get('/:quizId', ...quizManager, async (req, res) => {
 router.patch('/:quizId', ...quizManager, async (req, res) => {
 	try {
 		const quizId = normalize(req.params.quizId);
-		const session = await QuizSession.findOne({ quizId });
+		const session = await quizSessionRepository.findByQuizId(quizId);
 		if (!session) {
 			return res.status(404).json({ error: 'Quiz not found' });
 		}
@@ -273,8 +275,12 @@ router.patch('/:quizId', ...quizManager, async (req, res) => {
 		}
 
 		if (Object.keys(updates).length) {
-			session.set(updates);
-			await session.save();
+			const validatedUpdates = quizSessionUpdateSchema.parse(updates);
+			const updatedSession = await quizSessionRepository.update(quizId, validatedUpdates);
+			if (!updatedSession) {
+				return res.status(404).json({ error: 'Quiz not found' });
+			}
+			return res.status(200).json(updatedSession);
 		}
 		return res.status(200).json(session);
 	} catch (error) {
@@ -285,7 +291,7 @@ router.patch('/:quizId', ...quizManager, async (req, res) => {
 router.delete('/:quizId', ...quizManager, async (req, res) => {
 	try {
 		const quizId = normalize(req.params.quizId);
-		const session = await QuizSession.findOne({ quizId });
+		const session = await quizSessionRepository.findByQuizId(quizId);
 		if (!session) {
 			return res.status(404).json({ error: 'Quiz not found' });
 		}
@@ -293,14 +299,14 @@ router.delete('/:quizId', ...quizManager, async (req, res) => {
 			return res.status(403).json({ error: 'Forbidden' });
 		}
 
-		const hasAssignments = await QuizAssignment.exists({ quizId });
+		const hasAssignments = await quizAssignmentRepository.existsByQuiz(quizId);
 		if (hasAssignments) {
 			return res.status(409).json({
 				error: 'Quiz has student attempts; deactivate it instead',
 			});
 		}
 
-		await QuizSession.deleteOne({ _id: session._id });
+		await quizSessionRepository.deleteByQuizId(quizId);
 		return res.status(200).json({ message: 'Quiz deleted' });
 	} catch (error) {
 		return sendRouteError(res, error, 'Failed to delete quiz');

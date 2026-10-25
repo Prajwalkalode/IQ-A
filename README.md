@@ -44,3 +44,13 @@ removed after confirming the root stack manages the bucket.
 
 For pipeline use, persist `terraform/terraform.tfstate` between runs; local
 state is not shared automatically between pipeline agents.
+
+## Quiz service
+
+The quiz service uses DynamoDB tables provisioned by the Terraform quiz module.
+Configure `AWS_REGION`, `QUIZ_SESSIONS_TABLE`, and `QUIZ_ASSIGNMENTS_TABLE` in
+the service environment. With the default Terraform variables, the table names
+are `quiz-app-dev-quiz-sessions` and `quiz-app-dev-quiz-assignments`.
+
+The AWS SDK uses its default credential provider chain. For local development,
+set `AWS_PROFILE` to the profile that has access to these tables.
