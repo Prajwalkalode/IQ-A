@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
-const User = require('../models/User');
+const userRepository = require('../repositories/userRepository');
 const verifyToken = require('../middleware/verifyToken');
 const requireRole = require('../middleware/requireRole');
 
@@ -10,11 +10,14 @@ const router = express.Router();
 
 async function createUser({ email, password, name, role }) {
 	const passwordHash = await bcrypt.hash(password, 10);
-	return User.create({ email, passwordHash, name, role });
+	return userRepository.create({ email, passwordHash, name, role });
 }
 
 function isDuplicateEmailError(error) {
-	return error && error.code === 11000;
+	return (
+		error &&
+		(error.name === 'ConditionalCheckFailedException' || error.code === 11000)
+	);
 }
 
 router.post('/signup', async (req, res) => {
@@ -44,7 +47,7 @@ router.post('/login', async (req, res) => {
 	}
 
 	try {
-		const user = await User.findOne({ email });
+		const user = await userRepository.findByEmail(email);
 		const validPassword = user ? await bcrypt.compare(password, user.passwordHash) : false;
 
 		if (!validPassword) {
