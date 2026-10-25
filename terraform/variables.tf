@@ -15,9 +15,3 @@ variable "aws_region" {
   type        = string
   default     = "ap-south-1"
 }
-
-variable "bucket_name" {
-  description = "Globally unique name for the Terraform state bucket."
-  type        = string
-  default     = "iq-a-tfstate-quiz-app"
-}
