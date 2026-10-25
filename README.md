@@ -54,3 +54,11 @@ are `quiz-app-dev-quiz-sessions` and `quiz-app-dev-quiz-assignments`.
 
 The AWS SDK uses its default credential provider chain. For local development,
 set `AWS_PROFILE` to the profile that has access to these tables.
+
+## Question service
+
+The question service uses the DynamoDB table provisioned by the Terraform
+question module. Configure `AWS_REGION` and `QUESTIONS_TABLE` in the service
+environment. With the default Terraform variables, the table name is
+`quiz-app-dev-questions`. The AWS SDK uses its default credential provider
+chain; set `AWS_PROFILE` for local development.

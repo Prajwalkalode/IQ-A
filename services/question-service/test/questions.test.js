@@ -1,98 +1,87 @@
 const assert = require('node:assert/strict');
-const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const { after, before, beforeEach, describe, it } = require('node:test');
 
 process.env.JWT_SECRET = 'question-service-test-secret';
 process.env.INTERNAL_API_KEY = 'question-service-test-internal-key';
 
-const Question = require('../src/models/Question');
+const questionRepository = require('../src/repositories/questionRepository');
 const app = require('../src/app');
 const { request, startServer } = require('../http-helper');
 
 const questions = [];
 let server;
 let failCount = false;
+let nextId = 1;
 
-function matchesTopic(question, filter) {
-	return !filter.topic || question.topic === filter.topic;
+function matchesTopic(question, topic) {
+	return !topic || question.topic === topic;
 }
 
-function query(value) {
-	return {
-		select() {
-			return this;
-		},
-		sort() {
-			return this;
-		},
-		skip() {
-			return this;
-		},
-		limit() {
-			return this;
-		},
-		lean: async () => value,
-		then(resolve, reject) {
-			return Promise.resolve(value).then(resolve, reject);
-		},
+questionRepository.create = async (data) => {
+	const id = String(nextId++).padStart(24, '0');
+	const now = new Date().toISOString();
+	const question = {
+		_id: id,
+		__v: 0,
+		...data,
+		createdAt: now,
+		updatedAt: now,
 	};
-}
-
-Question.create = async (data) => {
-	const question = new Question(data);
-	await question.validate();
 	questions.push(question);
 	return question;
 };
-Question.countDocuments = async (filter = {}) => {
+
+questionRepository.countByTopic = async (topic) => {
 	if (failCount) {
 		throw new Error('Database unavailable');
 	}
-	return questions.filter((question) => matchesTopic(question, filter)).length;
+	return questions.filter((question) => matchesTopic(question, topic)).length;
 };
-Question.aggregate = async (pipeline) => {
-	const filter = pipeline.find((stage) => stage.$match)?.$match || {};
-	const size = pipeline.find((stage) => stage.$sample).$sample.size;
+questionRepository.findRandomByTopic = async (topic, count) => {
+	const availableQuestions = questions.filter((question) => matchesTopic(question, topic));
+	return {
+		available: availableQuestions.length,
+		questions: availableQuestions.slice(0, count).map(({ _id, text, options }) => ({
+			_id,
+			text,
+			options,
+		})),
+	};
+};
+questionRepository.findAnswersByIds = async (ids) => {
+	const idSet = new Set(ids.map((id) => id.toLowerCase()));
 	return questions
-		.filter((question) => matchesTopic(question, filter))
-		.slice(0, size)
-		.map(({ _id, text, options }) => ({ _id, text, options }));
+		.filter((question) => idSet.has(question._id.toLowerCase()))
+		.map(({ _id, correctIndex }) => ({ _id, correctIndex }));
 };
-Question.find = (filter = {}) =>
-	query(
-		questions
-			.filter((question) => {
-				if (filter.topic && !matchesTopic(question, filter)) {
-					return false;
-				}
-				if (filter._id && !filter._id.$in.some((id) => String(id) === String(question._id))) {
-					return false;
-				}
-				return true;
-			})
-			.map((question) => ({
-				_id: question._id,
-				correctIndex: question.correctIndex,
-			})),
-	);
-Question.findById = async (id) =>
-	questions.find((question) => String(question._id) === String(id)) || null;
-Question.findByIdAndUpdate = async (id, update, options) => {
-	assert.equal(options.runValidators, true);
-	const existingQuestion = await Question.findById(id);
+questionRepository.list = async ({ topic, page, limit }) => {
+	const filtered = questions
+		.filter((question) => matchesTopic(question, topic))
+		.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+	return {
+		questions: filtered.slice((page - 1) * limit, page * limit),
+		total: filtered.length,
+	};
+};
+questionRepository.findById = async (id) =>
+	questions.find((question) => question._id === id.toLowerCase()) || null;
+questionRepository.update = async (id, updates) => {
+	const existingQuestion = await questionRepository.findById(id);
 	if (!existingQuestion) {
 		return null;
 	}
-	const question = new Question(existingQuestion.toObject());
-	question.set(update.$set);
-	await question.validate();
-	const index = questions.findIndex((item) => String(item._id) === String(id));
+	const question = {
+		...existingQuestion,
+		...updates,
+		updatedAt: new Date().toISOString(),
+	};
+	const index = questions.findIndex((item) => item._id === id.toLowerCase());
 	questions[index] = question;
 	return question;
 };
-Question.findByIdAndDelete = async (id) => {
-	const index = questions.findIndex((question) => String(question._id) === String(id));
+questionRepository.deleteById = async (id) => {
+	const index = questions.findIndex((question) => question._id === id.toLowerCase());
 	if (index < 0) {
 		return null;
 	}
@@ -119,6 +108,7 @@ describe('question-service HTTP routes', () => {
 
 	beforeEach(() => {
 		questions.length = 0;
+		nextId = 1;
 		failCount = false;
 	});
 
@@ -186,7 +176,7 @@ describe('question-service HTTP routes', () => {
 		assert.equal((await request(server.baseUrl, '/questions/not-an-id', {
 			token: teacherToken,
 		})).status, 400);
-		assert.equal((await request(server.baseUrl, `/questions/${new mongoose.Types.ObjectId()}`, {
+		assert.equal((await request(server.baseUrl, '/questions/000000000000000000000099', {
 			token: teacherToken,
 		})).status, 404);
 		assert.equal((await request(server.baseUrl, `/questions/${id}`, {
@@ -200,7 +190,7 @@ describe('question-service HTTP routes', () => {
 	});
 
 	it('protects internal APIs and never exposes correct answers in random questions', async () => {
-		await Question.create({
+		await questionRepository.create({
 			text: 'Two plus two?',
 			options: ['Four', 'Five'],
 			correctIndex: 0,
