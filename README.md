@@ -63,6 +63,14 @@ environment. With the default Terraform variables, the table name is
 `quiz-app-dev-questions`. The AWS SDK uses its default credential provider
 chain; set `AWS_PROFILE` for local development.
 
+## Submission service
+
+The submission service uses the DynamoDB table provisioned by the Terraform
+submission module. Configure `AWS_REGION` and `SUBMISSIONS_TABLE` in the service
+environment. With the default Terraform variables, the table name is
+`quiz-app-dev-submissions`. The AWS SDK uses its default credential provider
+chain; set `AWS_PROFILE` for local development.
+
 ## Identity service
 
 The identity service uses the DynamoDB table provisioned by the Terraform

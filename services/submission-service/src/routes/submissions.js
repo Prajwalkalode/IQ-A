@@ -1,6 +1,6 @@
 const express = require('express');
-const mongoose = require('mongoose');
-const Submission = require('../models/Submission');
+const { ZodError } = require('zod');
+const submissionRepository = require('../repositories/submissionRepository');
 const verifyToken = require('../middleware/verifyToken');
 const requireRole = require('../middleware/requireRole');
 const quizClient = require('../clients/quizClient');
@@ -22,10 +22,7 @@ function sendError(res, error, context) {
 	if (error && error.upstream) {
 		return res.status(502).json({ error: 'Upstream service unavailable' });
 	}
-	if (
-		error instanceof mongoose.Error.ValidationError ||
-		error instanceof mongoose.Error.CastError
-	) {
+	if (error instanceof ZodError) {
 		return res.status(400).json({ error: error.message });
 	}
 
@@ -77,7 +74,10 @@ router.post('/', ...studentOnly, async (req, res) => {
 
 		const quizId = normalize(body.quizId);
 		const studentEmail = normalize(req.user.email);
-		const existingSubmission = await Submission.findOne({ quizId, studentEmail });
+		const existingSubmission = await submissionRepository.findByQuizAndStudent(
+			quizId,
+			studentEmail,
+		);
 		if (existingSubmission) {
 			return res.status(409).json({ error: 'Already submitted' });
 		}
@@ -130,19 +130,23 @@ router.post('/', ...studentOnly, async (req, res) => {
 			results.push({ questionId, selectedIndex, correctIndex, isCorrect });
 		}
 
-		const submission = new Submission({
+		const submissionData = {
 			quizId,
 			studentEmail,
 			results,
 			score,
 			total: results.length,
 			voided,
-		});
+		};
 
+		let submission;
 		try {
-			await submission.save();
+			submission = await submissionRepository.create(submissionData);
 		} catch (error) {
-			if (error && error.code === 11000) {
+			if (
+				error &&
+				(error.name === 'ConditionalCheckFailedException' || error.code === 11000)
+			) {
 				return res.status(409).json({ error: 'Already submitted' });
 			}
 			throw error;
@@ -174,7 +178,10 @@ router.get('/quiz/:quizId/mine', ...studentOnly, async (req, res) => {
 	try {
 		const quizId = normalize(req.params.quizId);
 		const studentEmail = normalize(req.user.email);
-		const submission = await Submission.findOne({ quizId, studentEmail });
+		const submission = await submissionRepository.findByQuizAndStudent(
+			quizId,
+			studentEmail,
+		);
 		if (!submission) {
 			return res.status(404).json({ error: 'Submission not found' });
 		}
@@ -211,9 +218,7 @@ router.get('/quiz/:quizId', ...quizManager, async (req, res) => {
 			return res.status(403).json({ error: 'Forbidden' });
 		}
 
-		const submissions = await Submission.find({ quizId })
-			.sort({ submittedAt: -1 })
-			.lean();
+		const submissions = await submissionRepository.listByQuiz(quizId);
 		const summaryPercentages = submissions
 			.map(({ score, total }) => percentage(score, total))
 			.filter((value) => value !== null);
