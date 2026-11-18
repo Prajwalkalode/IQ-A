@@ -71,3 +71,14 @@ Use an API Gateway HTTP API (payload format 2.0) and grant the Lambda execution
 role access to that service's DynamoDB tables. For local development, continue
 to run `npm start`; it starts the Express app from `src/app.js` using
 `local-server.js`.
+
+The Terraform root creates one Lambda function per service, with names
+`quiz-app-dev-identity`, `quiz-app-dev-question`, `quiz-app-dev-quiz`, and
+`quiz-app-dev-submission` by default. These functions initially contain a
+placeholder handler that returns HTTP 503 until the deployment pipeline uploads
+the service package. Terraform outputs each function's name and ARN for use by
+that pipeline; Terraform ignores later package changes so it will not overwrite
+code deployed by the pipeline. The functions have CloudWatch Logs access and
+DynamoDB access limited to their service tables. API Gateway and
+service-to-service endpoint configuration are not created by this Terraform
+stack.
