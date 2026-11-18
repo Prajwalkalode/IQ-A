@@ -62,3 +62,53 @@ resource "aws_lambda_function" "service" {
     ]
   }
 }
+
+resource "aws_apigatewayv2_api" "service" {
+  name          = "${var.function_name}-api"
+  protocol_type = "HTTP"
+}
+
+resource "aws_apigatewayv2_integration" "service" {
+  api_id                 = aws_apigatewayv2_api.service.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.service.invoke_arn
+  integration_method     = "POST"
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "service" {
+  api_id    = aws_apigatewayv2_api.service.id
+  route_key = "$default"
+  target    = "integrations/${aws_apigatewayv2_integration.service.id}"
+}
+
+resource "aws_apigatewayv2_stage" "service" {
+  api_id      = aws_apigatewayv2_api.service.id
+  name        = "$default"
+  auto_deploy = true
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_gateway.arn
+    format = jsonencode({
+      requestId            = "$context.requestId"
+      routeKey             = "$context.routeKey"
+      status               = "$context.status"
+      integrationError     = "$context.integrationErrorMessage"
+      integrationStatus    = "$context.integrationStatus"
+      integrationLatencyMs = "$context.integrationLatency"
+    })
+  }
+}
+
+resource "aws_cloudwatch_log_group" "api_gateway" {
+  name              = "/aws/apigateway/${var.function_name}"
+  retention_in_days = 14
+}
+
+resource "aws_lambda_permission" "api_gateway" {
+  statement_id  = "${var.function_name}-api-gateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.service.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.service.execution_arn}/*"
+}

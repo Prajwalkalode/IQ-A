@@ -79,6 +79,11 @@ placeholder handler that returns HTTP 503 until the deployment pipeline uploads
 the service package. Terraform outputs each function's name and ARN for use by
 that pipeline; Terraform ignores later package changes so it will not overwrite
 code deployed by the pipeline. The functions have CloudWatch Logs access and
-DynamoDB access limited to their service tables. API Gateway and
-service-to-service endpoint configuration are not created by this Terraform
-stack.
+DynamoDB access limited to their service tables.
+
+Terraform also creates a public API Gateway HTTP API for each Lambda. Each API
+forwards all methods and paths to its service Lambda using payload format 2.0.
+Use `terraform output <service>_api_endpoint` to retrieve a base URL, then
+append the service route path. The endpoint remains available while the
+placeholder handler is deployed and returns HTTP 503 until real service code
+is uploaded.
