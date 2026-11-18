@@ -61,3 +61,13 @@ identity module. Configure `AWS_REGION` and `USERS_TABLE` in the service
 environment. With the default Terraform variables, the table name is
 `quiz-app-dev-users`. The AWS SDK uses its default credential provider chain;
 set `AWS_PROFILE` for local development.
+
+## Running services on AWS Lambda
+
+Each service exports an API Gateway-compatible Lambda handler from
+`src/handler.js`. When configuring a Lambda function, use the service directory
+as the deployment package root and set the handler to `src/handler.handler`.
+Use an API Gateway HTTP API (payload format 2.0) and grant the Lambda execution
+role access to that service's DynamoDB tables. For local development, continue
+to run `npm start`; it starts the Express app from `src/app.js` using
+`local-server.js`.
