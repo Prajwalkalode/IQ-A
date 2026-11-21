@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const { GetParameterCommand, SSMClient } = require('@aws-sdk/client-ssm');
+const { mockClient } = require('aws-sdk-client-mock');
 const { after, before, beforeEach, describe, it } = require('node:test');
 
 process.env.JWT_SECRET = 'quiz-service-test-secret';
@@ -8,9 +10,11 @@ process.env.INTERNAL_API_KEY = 'quiz-service-test-internal-key';
 
 const quizAssignmentRepository = require('../src/repositories/quizAssignmentRepository');
 const quizSessionRepository = require('../src/repositories/quizSessionRepository');
+const questionClient = require('../src/clients/questionClient');
 const app = require('../src/app');
 const { request, startServer } = require('../http-helper');
 
+const ssmMock = mockClient(SSMClient);
 const sessions = [];
 const assignments = [];
 let bankQuestions = [];
@@ -191,6 +195,7 @@ describe('quiz-service HTTP routes', () => {
 			status: 200,
 			body: { status: 'quiz-service ok' },
 		});
+
 		assert.equal((await request(server.baseUrl, '/quiz', {
 			method: 'POST',
 			body: { quizId: 'math-quiz', questionCount: 2 },
@@ -259,6 +264,27 @@ describe('quiz-service HTTP routes', () => {
 		assert.equal(upstream.status, 502);
 		assert.deepEqual(upstream.body, { error: 'Question service unavailable' });
 		upstreamError = false;
+	});
+
+	it('loads and caches the question service URL from SSM when no local override is set', async () => {
+		const previousUrl = process.env.QUESTION_SERVICE_URL;
+		const previousParameter = process.env.QUESTION_SERVICE_URL_PARAMETER;
+		delete process.env.QUESTION_SERVICE_URL;
+		process.env.QUESTION_SERVICE_URL_PARAMETER = '/test/services/question/url';
+		ssmMock.reset();
+		ssmMock.on(GetParameterCommand, { Name: process.env.QUESTION_SERVICE_URL_PARAMETER }).resolves({
+			Parameter: { Value: questionServer.baseUrl },
+		});
+
+		try {
+			assert.equal(await questionClient.countQuestions('math'), 10);
+			assert.equal(await questionClient.countQuestions('math'), 10);
+			assert.equal(ssmMock.commandCalls(GetParameterCommand).length, 1);
+		} finally {
+			process.env.QUESTION_SERVICE_URL = previousUrl;
+			process.env.QUESTION_SERVICE_URL_PARAMETER = previousParameter;
+			ssmMock.reset();
+		}
 	});
 
 	it('enforces teacher ownership and protects quizzes with assignments from deletion', async () => {
