@@ -30,3 +30,9 @@ variable "dynamodb_actions" {
   type        = list(string)
   default     = []
 }
+
+variable "ssm_parameter_arns" {
+  description = "SSM parameters the function may read."
+  type        = list(string)
+  default     = []
+}
