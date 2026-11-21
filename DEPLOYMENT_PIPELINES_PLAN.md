@@ -21,7 +21,9 @@ Terraform Cloud is not required.
 - The quiz and submission services call other services using
   `QUESTION_SERVICE_URL` and `QUIZ_SERVICE_URL` environment variables.
 - `.github/workflows/deploy-project.yml` is implemented as a manually triggered
-  workflow. Its first run still needs to be performed from GitHub Actions.
+  workflow with separate package, Lambda configuration, and deployment steps.
+- `.github/workflows/destroy-project.yml` is implemented as a manually
+  triggered workflow with an explicit destroy confirmation.
 
 ## One-time prerequisites
 
@@ -56,9 +58,9 @@ Trigger it manually with `workflow_dispatch`.
   - `/quiz-app/dev/services/question/url`
   - `/quiz-app/dev/services/quiz/url`
   - `/quiz-app/dev/services/submission/url`
-- [x] Package each service for Lambda, including production dependencies, with
-  `src/handler.handler` as the entry point; upload packages with
-  `aws lambda update-function-code`.
+- [x] Package each service for Lambda, configure its application secrets, and
+  upload the packages in separate pipeline steps. Each package uses
+  `src/handler.handler` as its entry point.
 - [x] Run post-deployment health checks against each API.
 
 SSM parameters can be Terraform resources whose values reference the API
@@ -87,9 +89,9 @@ Suggested workflow: `.github/workflows/destroy-project.yml`
 Trigger it manually and require an explicit confirmation before destructive
 operations.
 
-- [ ] Initialize Terraform using the same persistent state backend.
-- [ ] Show the destroy plan and require the configured approval/confirmation.
-- [ ] Run `terraform destroy` for the application stack.
+- [x] Initialize Terraform using the same persistent state backend.
+- [x] Show the destroy plan and require selecting `destroy` to confirm.
+- [x] Apply the destroy plan for the application stack.
 - [ ] Verify that DynamoDB tables (including their data), Lambda functions and
   deployed code, API Gateway APIs, logs, and SSM endpoint parameters are
   removed.
