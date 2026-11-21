@@ -1,12 +1,18 @@
 const express = require('express');
-const mongoose = require('mongoose');
-const Question = require('../models/Question');
+const { ZodError } = require('zod');
+const questionRepository = require('../repositories/questionRepository');
+const { questionSchema } = require('../schemas/questionSchema');
 const internalOnly = require('../middleware/internalOnly');
 const requireRole = require('../middleware/requireRole');
 const verifyToken = require('../middleware/verifyToken');
 
 const router = express.Router();
 const questionManager = [verifyToken, requireRole('admin', 'teacher')];
+const questionIdPattern = /^[a-f\d]{24}$/i;
+
+function isQuestionId(value) {
+	return typeof value === 'string' && questionIdPattern.test(value);
+}
 
 function parsePositiveInteger(value) {
 	if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
@@ -24,19 +30,14 @@ router.get('/internal/random', internalOnly, async (req, res) => {
 			return res.status(400).json({ error: 'count must be a positive integer' });
 		}
 
-		const match = {};
-		if (typeof req.query.topic === 'string' && req.query.topic.trim()) {
-			match.topic = req.query.topic.trim().toLowerCase();
-		}
-
-		const [available, questions] = await Promise.all([
-			Question.countDocuments(match),
-			Question.aggregate([
-				...(Object.keys(match).length ? [{ $match: match }] : []),
-				{ $sample: { size: count } },
-				{ $project: { _id: 1, text: 1, options: 1 } },
-			]),
-		]);
+		const topic =
+			typeof req.query.topic === 'string' && req.query.topic.trim()
+				? req.query.topic.trim().toLowerCase()
+				: undefined;
+		const { available, questions } = await questionRepository.findRandomByTopic(
+			topic,
+			count,
+		);
 
 		const response = { questions };
 		if (available < count) {
@@ -52,12 +53,11 @@ router.get('/internal/random', internalOnly, async (req, res) => {
 
 router.get('/internal/count', internalOnly, async (req, res) => {
 	try {
-		const filter = {};
-		if (typeof req.query.topic === 'string' && req.query.topic.trim()) {
-			filter.topic = req.query.topic.trim().toLowerCase();
-		}
-
-		const available = await Question.countDocuments(filter);
+		const topic =
+			typeof req.query.topic === 'string' && req.query.topic.trim()
+				? req.query.topic.trim().toLowerCase()
+				: undefined;
+		const available = await questionRepository.countByTopic(topic);
 		return res.status(200).json({ available });
 	} catch (error) {
 		console.error('Failed to count questions', error);
@@ -68,19 +68,12 @@ router.get('/internal/count', internalOnly, async (req, res) => {
 router.post('/internal/answers', internalOnly, async (req, res) => {
 	try {
 		const { ids } = req.body || {};
-		if (
-			!Array.isArray(ids) ||
-			ids.some((id) => !mongoose.isObjectIdOrHexString(id))
-		) {
+		if (!Array.isArray(ids) || ids.some((id) => !isQuestionId(id))) {
 			return res.status(400).json({ error: 'ids must be an array of valid question IDs' });
 		}
 
-		const questions = await Question.find({ _id: { $in: ids } })
-			.select('_id correctIndex')
-			.lean();
-		return res.status(200).json(
-			questions.map(({ _id, correctIndex }) => ({ _id, correctIndex })),
-		);
+		const questions = await questionRepository.findAnswersByIds(ids);
+		return res.status(200).json(questions);
 	} catch (error) {
 		console.error('Failed to retrieve question answers', error);
 		return res.status(500).json({ error: 'Internal server error' });
@@ -89,20 +82,18 @@ router.post('/internal/answers', internalOnly, async (req, res) => {
 
 router.post('/', ...questionManager, async (req, res) => {
 	try {
-		const { text, options, correctIndex, topic } = req.body || {};
-		const question = await Question.create({
-			text,
-			options,
-			correctIndex,
-			topic,
+		const body = req.body || {};
+		const questionInput = questionSchema.parse({
+			text: body.text,
+			options: body.options,
+			correctIndex: body.correctIndex,
+			topic: body.topic,
 			createdBy: req.user.email,
 		});
+		const question = await questionRepository.create(questionInput);
 		return res.status(201).json(question);
 	} catch (error) {
-		if (
-			error instanceof mongoose.Error.ValidationError ||
-			error instanceof mongoose.Error.CastError
-		) {
+		if (error instanceof ZodError) {
 			return res.status(400).json({ error: error.message });
 		}
 
@@ -125,18 +116,15 @@ router.get('/', ...questionManager, async (req, res) => {
 			return res.status(400).json({ error: 'page and limit must be positive integers' });
 		}
 
-		const filter = {};
-		if (typeof req.query.topic === 'string' && req.query.topic.trim()) {
-			filter.topic = req.query.topic.trim().toLowerCase();
-		}
-
-		const [questions, total] = await Promise.all([
-			Question.find(filter)
-				.sort({ createdAt: -1 })
-				.skip((page - 1) * limit)
-				.limit(limit),
-			Question.countDocuments(filter),
-		]);
+		const topic =
+			typeof req.query.topic === 'string' && req.query.topic.trim()
+				? req.query.topic.trim().toLowerCase()
+				: undefined;
+		const { questions, total } = await questionRepository.list({
+			topic,
+			page,
+			limit,
+		});
 
 		return res.status(200).json({ questions, total, page, limit });
 	} catch (error) {
@@ -147,11 +135,11 @@ router.get('/', ...questionManager, async (req, res) => {
 
 router.get('/:id', ...questionManager, async (req, res) => {
 	try {
-		if (!mongoose.isObjectIdOrHexString(req.params.id)) {
+		if (!isQuestionId(req.params.id)) {
 			return res.status(400).json({ error: 'Invalid question ID' });
 		}
 
-		const question = await Question.findById(req.params.id);
+		const question = await questionRepository.findById(req.params.id);
 		if (!question) {
 			return res.status(404).json({ error: 'Question not found' });
 		}
@@ -165,7 +153,7 @@ router.get('/:id', ...questionManager, async (req, res) => {
 
 router.put('/:id', ...questionManager, async (req, res) => {
 	try {
-		if (!mongoose.isObjectIdOrHexString(req.params.id)) {
+		if (!isQuestionId(req.params.id)) {
 			return res.status(400).json({ error: 'Invalid question ID' });
 		}
 
@@ -176,43 +164,31 @@ router.put('/:id', ...questionManager, async (req, res) => {
 			}
 		}
 
-		const existingQuestion = await Question.findById(req.params.id);
+		const existingQuestion = await questionRepository.findById(req.params.id);
 		if (!existingQuestion) {
 			return res.status(404).json({ error: 'Question not found' });
 		}
 
-		const values = {
-			text: Object.prototype.hasOwnProperty.call(updates, 'text')
-				? updates.text
-				: existingQuestion.text,
-			options: Object.prototype.hasOwnProperty.call(updates, 'options')
+		const validatedQuestion = questionSchema.parse({
+			text: Object.hasOwn(updates, 'text') ? updates.text : existingQuestion.text,
+			options: Object.hasOwn(updates, 'options')
 				? updates.options
 				: existingQuestion.options,
-			correctIndex: Object.prototype.hasOwnProperty.call(updates, 'correctIndex')
+			correctIndex: Object.hasOwn(updates, 'correctIndex')
 				? updates.correctIndex
 				: existingQuestion.correctIndex,
-		};
-		if (Object.prototype.hasOwnProperty.call(updates, 'topic')) {
-			values.topic = updates.topic;
-		} else if (existingQuestion.topic !== undefined) {
-			values.topic = existingQuestion.topic;
-		}
+			topic: Object.hasOwn(updates, 'topic') ? updates.topic : existingQuestion.topic,
+			createdBy: existingQuestion.createdBy,
+		});
 
-		const question = await Question.findByIdAndUpdate(
-			req.params.id,
-			{ $set: values },
-			{ new: true, runValidators: true },
-		);
+		const question = await questionRepository.update(req.params.id, validatedQuestion);
 		if (!question) {
 			return res.status(404).json({ error: 'Question not found' });
 		}
 
 		return res.status(200).json(question);
 	} catch (error) {
-		if (
-			error instanceof mongoose.Error.ValidationError ||
-			error instanceof mongoose.Error.CastError
-		) {
+		if (error instanceof ZodError) {
 			return res.status(400).json({ error: error.message });
 		}
 
@@ -223,11 +199,11 @@ router.put('/:id', ...questionManager, async (req, res) => {
 
 router.delete('/:id', ...questionManager, async (req, res) => {
 	try {
-		if (!mongoose.isObjectIdOrHexString(req.params.id)) {
+		if (!isQuestionId(req.params.id)) {
 			return res.status(400).json({ error: 'Invalid question ID' });
 		}
 
-		const question = await Question.findByIdAndDelete(req.params.id);
+		const question = await questionRepository.deleteById(req.params.id);
 		if (!question) {
 			return res.status(404).json({ error: 'Question not found' });
 		}

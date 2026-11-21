@@ -5,7 +5,7 @@ const { after, before, beforeEach, describe, it } = require('node:test');
 process.env.JWT_SECRET = 'submission-service-test-secret';
 process.env.INTERNAL_API_KEY = 'submission-service-test-internal-key';
 
-const Submission = require('../src/models/Submission');
+const submissionRepository = require('../src/repositories/submissionRepository');
 const quizClient = require('../src/clients/quizClient');
 const questionClient = require('../src/clients/questionClient');
 const app = require('../src/app');
@@ -20,35 +20,41 @@ let upstreamFailure = false;
 let completionFailure = false;
 let completionCalls = 0;
 
-function matches(submission, filter) {
-	return Object.entries(filter).every(
-		([key, value]) => String(submission[key]) === String(value),
-	);
-}
-
-Submission.findOne = async (filter) =>
-	submissions.find((submission) => matches(submission, filter)) || null;
-Submission.prototype.save = async function () {
-	await this.validate();
-	if (submissions.some((submission) => submission.quizId === this.quizId && submission.studentEmail === this.studentEmail)) {
+submissionRepository.findByQuizAndStudent = async (quizId, studentEmail) =>
+	submissions.find(
+		(submission) =>
+			submission.quizId === quizId && submission.studentEmail === studentEmail,
+	) || null;
+submissionRepository.create = async (input) => {
+	if (
+		submissions.some(
+			(submission) =>
+				submission.quizId === input.quizId &&
+				submission.studentEmail === input.studentEmail,
+		)
+	) {
 		const error = new Error('Duplicate submission');
-		error.code = 11000;
+		error.name = 'ConditionalCheckFailedException';
 		throw error;
 	}
-	submissions.push(this);
-	return this;
+	const now = new Date().toISOString();
+	const submission = {
+		_id: '000000000000000000000001',
+		__v: 0,
+		voided: 0,
+		...input,
+		submittedAt: now,
+		createdAt: now,
+		updatedAt: now,
+	};
+	submissions.push(submission);
+	return submission;
 };
-Submission.find = (filter = {}) => ({
-	sort() {
-		return this;
-	},
-	lean: async () =>
-		submissions
-			.filter((submission) => matches(submission, filter))
-			.slice()
-			.sort((left, right) => right.submittedAt - left.submittedAt)
-			.map((submission) => submission.toObject()),
-});
+submissionRepository.listByQuiz = async (quizId) =>
+	submissions
+		.filter((submission) => submission.quizId === quizId)
+		.slice()
+		.sort((left, right) => right.submittedAt.localeCompare(left.submittedAt));
 
 quizClient.getAssignment = async () => {
 	if (upstreamFailure) {
@@ -262,7 +268,7 @@ describe('submission-service HTTP routes', () => {
 	});
 
 	it('reveals current score on mine and limits reports to the quiz owner or admin', async () => {
-		const submission = new Submission({
+		await submissionRepository.create({
 			quizId: 'math-quiz',
 			studentEmail: 'student@example.com',
 			results: [{ questionId: 'q1', selectedIndex: 0, correctIndex: 0, isCorrect: true }],
@@ -270,7 +276,6 @@ describe('submission-service HTTP routes', () => {
 			total: 1,
 			voided: 0,
 		});
-		await submission.save();
 
 		assignment.revealScore = false;
 		const privateResult = await request(server.baseUrl, '/submissions/quiz/math-quiz/mine', {

@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
 const express = require('express');
+const { GetParameterCommand, SSMClient } = require('@aws-sdk/client-ssm');
+const { mockClient } = require('aws-sdk-client-mock');
 const { after, before, describe, it } = require('node:test');
 
 process.env.INTERNAL_API_KEY = 'submission-client-test-key';
@@ -8,6 +10,7 @@ const quizClient = require('../src/clients/quizClient');
 const questionClient = require('../src/clients/questionClient');
 const { startServer } = require('../http-helper');
 
+const ssmMock = mockClient(SSMClient);
 let server;
 let upstreamStatus = 200;
 const receivedKeys = [];
@@ -107,6 +110,31 @@ describe('submission-service internal clients', () => {
 			await assert.rejects(quizClient.getSession('quiz-one'), (error) => error.upstream === true);
 		} finally {
 			process.env.QUIZ_SERVICE_URL = previousUrl;
+		}
+	});
+
+	it('loads and caches the question service URL from SSM when no local override is set', async () => {
+		const previousUrl = process.env.QUESTION_SERVICE_URL;
+		const previousParameter = process.env.QUESTION_SERVICE_URL_PARAMETER;
+		delete process.env.QUESTION_SERVICE_URL;
+		process.env.QUESTION_SERVICE_URL_PARAMETER = '/test/services/question/url';
+		ssmMock.reset();
+		ssmMock.on(GetParameterCommand, { Name: process.env.QUESTION_SERVICE_URL_PARAMETER }).resolves({
+			Parameter: { Value: server.baseUrl },
+		});
+
+		try {
+			assert.deepEqual(await questionClient.getAnswers(['q1']), [
+				{ _id: 'q1', correctIndex: 1 },
+			]);
+			assert.deepEqual(await questionClient.getAnswers(['q1']), [
+				{ _id: 'q1', correctIndex: 1 },
+			]);
+			assert.equal(ssmMock.commandCalls(GetParameterCommand).length, 1);
+		} finally {
+			process.env.QUESTION_SERVICE_URL = previousUrl;
+			process.env.QUESTION_SERVICE_URL_PARAMETER = previousParameter;
+			ssmMock.reset();
 		}
 	});
 });

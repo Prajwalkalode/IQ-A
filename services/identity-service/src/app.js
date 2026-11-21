@@ -10,7 +10,7 @@ app.get('/health', (req, res) => {
 	res.status(200).json({ status: 'identity-service ok' });
 });
 
-app.use((error, req, res, next) => {
+app.use((error, req, res, _next) => {
 	console.error(error);
 	res.status(500).json({ error: 'Internal server error' });
 });

@@ -1,43 +1,26 @@
 const assert = require('node:assert/strict');
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const { GetParameterCommand, SSMClient } = require('@aws-sdk/client-ssm');
+const { mockClient } = require('aws-sdk-client-mock');
 const { after, before, beforeEach, describe, it } = require('node:test');
 
 process.env.JWT_SECRET = 'quiz-service-test-secret';
 process.env.INTERNAL_API_KEY = 'quiz-service-test-internal-key';
 
-const QuizAssignment = require('../src/models/QuizAssignment');
-const QuizSession = require('../src/models/QuizSession');
+const quizAssignmentRepository = require('../src/repositories/quizAssignmentRepository');
+const quizSessionRepository = require('../src/repositories/quizSessionRepository');
+const questionClient = require('../src/clients/questionClient');
 const app = require('../src/app');
 const { request, startServer } = require('../http-helper');
 
+const ssmMock = mockClient(SSMClient);
 const sessions = [];
 const assignments = [];
 let bankQuestions = [];
 let server;
 let questionServer;
 let upstreamError = false;
-
-function matches(document, filter) {
-	return Object.entries(filter).every(
-		([key, value]) => String(document[key]) === String(value),
-	);
-}
-
-function query(value) {
-	return {
-		select() {
-			return this;
-		},
-		lean: async () => value,
-		sort() {
-			return this;
-		},
-		then(resolve, reject) {
-			return Promise.resolve(value).then(resolve, reject);
-		},
-	};
-}
 
 function matchingQuestions(topic) {
 	return bankQuestions.filter((question) => !topic || question.topic === topic);
@@ -70,61 +53,98 @@ questionApp.get('/questions/internal/random', (req, res) => {
 	return res.status(200).json(response);
 });
 
-QuizSession.prototype.save = async function () {
-	await this.validate();
-	if (sessions.some((session) => session.quizId === this.quizId && session !== this)) {
+quizSessionRepository.findByQuizId = async (quizId) =>
+	sessions.find((session) => session.quizId === quizId) || null;
+quizSessionRepository.create = async (session) => {
+	if (sessions.some((item) => item.quizId === session.quizId)) {
 		const error = new Error('Duplicate quiz ID');
-		error.code = 11000;
+		error.name = 'ConditionalCheckFailedException';
 		throw error;
 	}
-	if (!sessions.includes(this)) {
-		sessions.push(this);
-	}
-	return this;
+	const created = {
+		_id: '000000000000000000000001',
+		__v: 0,
+		isActive: true,
+		...session,
+		createdAt: new Date().toISOString(),
+		updatedAt: new Date().toISOString(),
+	};
+	sessions.push(created);
+	return created;
 };
-QuizSession.findOne = (filter) =>
-	query(sessions.find((session) => matches(session, filter)) || null);
-QuizSession.find = (filter = {}) => ({
-	sort() {
-		return this;
-	},
-	then(resolve, reject) {
-		return Promise.resolve(sessions.filter((session) => matches(session, filter))).then(
-			resolve,
-			reject,
-		);
-	},
-});
-QuizSession.deleteOne = async ({ _id }) => {
-	const index = sessions.findIndex((session) => String(session._id) === String(_id));
+quizSessionRepository.listAll = async () =>
+	[...sessions].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+quizSessionRepository.listByCreator = async (createdBy) =>
+	[...sessions]
+		.filter((session) => session.createdBy === createdBy)
+		.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+quizSessionRepository.update = async (quizId, updates) => {
+	const session = sessions.find((item) => item.quizId === quizId);
+	if (!session) {
+		return null;
+	}
+	Object.assign(session, updates, {
+		updatedAt: new Date().toISOString(),
+		__v: session.__v + 1,
+	});
+	return session;
+};
+quizSessionRepository.deleteByQuizId = async (quizId) => {
+	const index = sessions.findIndex((session) => session.quizId === quizId);
 	if (index >= 0) {
 		sessions.splice(index, 1);
 	}
 };
 
-QuizAssignment.prototype.save = async function () {
-	await this.validate();
-	if (assignments.some((assignment) => assignment.quizId === this.quizId && assignment.studentEmail === this.studentEmail)) {
+quizAssignmentRepository.findByQuizAndStudent = async (quizId, studentEmail) =>
+	assignments.find(
+		(assignment) =>
+			assignment.quizId === quizId && assignment.studentEmail === studentEmail,
+	) || null;
+quizAssignmentRepository.create = async (assignment) => {
+	if (
+		assignments.some(
+			(item) =>
+				item.quizId === assignment.quizId &&
+				item.studentEmail === assignment.studentEmail,
+		)
+	) {
 		const error = new Error('Duplicate assignment');
-		error.code = 11000;
+		error.name = 'ConditionalCheckFailedException';
 		throw error;
 	}
-	this._id = new (require('mongoose').Types.ObjectId)();
-	assignments.push(this);
-	return this;
+	const created = {
+		_id: '000000000000000000000002',
+		__v: 0,
+		status: 'assigned',
+		startedAt: new Date().toISOString(),
+		createdAt: new Date().toISOString(),
+		updatedAt: new Date().toISOString(),
+		...assignment,
+	};
+	assignments.push(created);
+	return created;
 };
-QuizAssignment.findOne = (filter) =>
-	query(assignments.find((assignment) => matches(assignment, filter)) || null);
-QuizAssignment.findOneAndUpdate = async (filter, update) => {
-	const assignment = assignments.find((item) => matches(item, filter));
+quizAssignmentRepository.complete = async (quizId, studentEmail) => {
+	const assignment = assignments.find(
+		(item) =>
+			item.quizId === quizId &&
+			item.studentEmail === studentEmail &&
+			item.status === 'assigned',
+	);
 	if (!assignment) {
 		return null;
 	}
-	Object.assign(assignment, update.$set);
+	Object.assign(assignment, {
+		status: 'completed',
+		completedAt: new Date().toISOString(),
+		updatedAt: new Date().toISOString(),
+		__v: assignment.__v + 1,
+	});
 	return assignment;
 };
-QuizAssignment.exists = async (filter) =>
-	assignments.some((assignment) => matches(assignment, filter));
+quizAssignmentRepository.existsByQuiz = async (quizId) =>
+	assignments.some((assignment) => assignment.quizId === quizId);
 
 const teacherToken = jwt.sign(
 	{ email: 'teacher@example.com', role: 'teacher' },
@@ -175,6 +195,7 @@ describe('quiz-service HTTP routes', () => {
 			status: 200,
 			body: { status: 'quiz-service ok' },
 		});
+
 		assert.equal((await request(server.baseUrl, '/quiz', {
 			method: 'POST',
 			body: { quizId: 'math-quiz', questionCount: 2 },
@@ -243,6 +264,27 @@ describe('quiz-service HTTP routes', () => {
 		assert.equal(upstream.status, 502);
 		assert.deepEqual(upstream.body, { error: 'Question service unavailable' });
 		upstreamError = false;
+	});
+
+	it('loads and caches the question service URL from SSM when no local override is set', async () => {
+		const previousUrl = process.env.QUESTION_SERVICE_URL;
+		const previousParameter = process.env.QUESTION_SERVICE_URL_PARAMETER;
+		delete process.env.QUESTION_SERVICE_URL;
+		process.env.QUESTION_SERVICE_URL_PARAMETER = '/test/services/question/url';
+		ssmMock.reset();
+		ssmMock.on(GetParameterCommand, { Name: process.env.QUESTION_SERVICE_URL_PARAMETER }).resolves({
+			Parameter: { Value: questionServer.baseUrl },
+		});
+
+		try {
+			assert.equal(await questionClient.countQuestions('math'), 10);
+			assert.equal(await questionClient.countQuestions('math'), 10);
+			assert.equal(ssmMock.commandCalls(GetParameterCommand).length, 1);
+		} finally {
+			process.env.QUESTION_SERVICE_URL = previousUrl;
+			process.env.QUESTION_SERVICE_URL_PARAMETER = previousParameter;
+			ssmMock.reset();
+		}
 	});
 
 	it('enforces teacher ownership and protects quizzes with assignments from deletion', async () => {
