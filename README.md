@@ -34,14 +34,21 @@ The root configuration defaults `project_name` to `quiz-app` and
 
 The manually triggered GitHub Actions workflow in
 `.github/workflows/deploy-project.yml` validates the project, applies
-infrastructure, packages and deploys all four Lambda services, and smoke-tests
-their APIs. Configure these GitHub Actions secrets:
+infrastructure, then packages services, configures Lambda secrets, deploys
+each package, and smoke-tests the APIs in separate steps. Configure these
+GitHub Actions secrets:
 
 - `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for the deployment IAM user.
 - `JWT_SECRET` and `INTERNAL_API_KEY` for application authentication.
 
 Static AWS access keys are long-lived credentials. Keep the deployment user
 dedicated to this repository and rotate its keys periodically.
+
+The manually triggered `.github/workflows/destroy-project.yml` workflow
+requires selecting `destroy` to confirm removal. It deletes the project
+infrastructure, including DynamoDB tables and their data, but leaves the
+separate Terraform state bucket in place. Configure the GitHub `destroy`
+environment with any desired branch restrictions or approval requirements.
 
 ## Quiz service
 

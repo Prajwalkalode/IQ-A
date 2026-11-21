@@ -1,0 +1,62 @@
+name: Destroy project
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_destroy:
+        description: Select "destroy" to permanently delete project infrastructure and DynamoDB data.
+        required: true
+        type: choice
+        options:
+          - cancel
+          - destroy
+        default: cancel
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  destroy:
+    name: Destroy project infrastructure
+    runs-on: ubuntu-latest
+    environment: destroy
+    steps:
+      - name: Require explicit confirmation
+        env:
+          CONFIRM_DESTROY: ${{ inputs.confirm_destroy }}
+        run: |
+          if [ "$CONFIRM_DESTROY" != "destroy" ]; then
+            echo "::error::Select destroy to confirm permanent removal of project infrastructure and data."
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Initialize Terraform
+        working-directory: terraform
+        run: terraform init -input=false -lockfile=readonly
+
+      - name: Plan infrastructure destruction
+        working-directory: terraform
+        run: terraform plan -destroy -input=false -out="$RUNNER_TEMP/terraform-destroy.tfplan"
+
+      - name: Destroy infrastructure
+        working-directory: terraform
+        run: terraform apply -input=false "$RUNNER_TEMP/terraform-destroy.tfplan"
