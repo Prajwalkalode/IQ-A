@@ -60,18 +60,31 @@ jobs:
         working-directory: terraform
         run: terraform apply -input=false "$RUNNER_TEMP/terraform.tfplan"
 
-      - name: Package, configure, and deploy services
+      - name: Package service artifacts
+        run: |
+          set -euo pipefail
+
+          deployment_dir="$RUNNER_TEMP/iq-a-lambda-packages"
+          mkdir -p "$deployment_dir"
+
+          for service in identity question quiz submission; do
+            service_dir="services/${service}-service"
+            npm ci --omit=dev --prefix "$service_dir"
+            (
+              cd "$service_dir"
+              zip -qr "$deployment_dir/${service}.zip" src node_modules package.json
+            )
+          done
+
+      - name: Configure Lambda application secrets
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           INTERNAL_API_KEY: ${{ secrets.INTERNAL_API_KEY }}
         run: |
           set -euo pipefail
 
-          deployment_dir="$(mktemp -d)"
-          trap 'rm -rf "$deployment_dir"' EXIT
-
+          deployment_dir="$RUNNER_TEMP/iq-a-lambda-packages"
           for service in identity question quiz submission; do
-            service_dir="services/${service}-service"
             function_name="$(terraform -chdir=terraform output -raw "${service}_lambda_function_name")"
             current_env="$deployment_dir/${service}-current.json"
             merged_env="$deployment_dir/${service}-merged.json"
@@ -81,7 +94,6 @@ jobs:
               --function-name "$function_name" \
               --query 'Environment.Variables' \
               --output json > "$current_env"
-
             jq --arg jwt "$JWT_SECRET" --arg internal "$INTERNAL_API_KEY" \
               '(. // {}) + {JWT_SECRET: $jwt, INTERNAL_API_KEY: $internal}' \
               "$current_env" > "$merged_env"
@@ -92,13 +104,15 @@ jobs:
               --function-name "$function_name" \
               --environment "file://$lambda_env" > /dev/null
             aws lambda wait function-updated --function-name "$function_name"
+          done
 
-            npm ci --omit=dev --prefix "$service_dir"
-            (
-              cd "$service_dir"
-              zip -qr "$deployment_dir/${service}.zip" src node_modules package.json
-            )
+      - name: Deploy service packages
+        run: |
+          set -euo pipefail
 
+          deployment_dir="$RUNNER_TEMP/iq-a-lambda-packages"
+          for service in identity question quiz submission; do
+            function_name="$(terraform -chdir=terraform output -raw "${service}_lambda_function_name")"
             aws lambda update-function-code \
               --function-name "$function_name" \
               --zip-file "fileb://$deployment_dir/${service}.zip" > /dev/null
@@ -116,3 +130,7 @@ jobs:
             printf '%s' "$response" | jq --exit-status --arg expected "$expected" '.status == $expected' > /dev/null
             echo "$service API health check passed"
           done
+
+      - name: Clean up deployment packages
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/iq-a-lambda-packages"
