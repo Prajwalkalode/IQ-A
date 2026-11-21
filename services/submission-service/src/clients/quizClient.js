@@ -1,3 +1,5 @@
+const { resolveServiceUrl } = require('./serviceUrl');
+
 class QuizServiceError extends Error {
 	constructor(message, cause) {
 		super(message, { cause });
@@ -6,13 +8,13 @@ class QuizServiceError extends Error {
 	}
 }
 
-function quizServiceUrl(path) {
-	const baseUrl = process.env.QUIZ_SERVICE_URL;
-	if (!baseUrl) {
-		throw new QuizServiceError('QUIZ_SERVICE_URL is not configured');
-	}
-
-	return `${baseUrl.replace(/\/+$/, '')}${path}`;
+async function quizServiceUrl(path) {
+	const baseUrl = await resolveServiceUrl(
+		'QUIZ_SERVICE_URL',
+		'QUIZ_SERVICE_URL_PARAMETER',
+		QuizServiceError,
+	);
+	return `${baseUrl}${path}`;
 }
 
 async function requestQuizService(path, options = {}, acceptedStatuses = []) {
@@ -22,7 +24,7 @@ async function requestQuizService(path, options = {}, acceptedStatuses = []) {
 
 	let response;
 	try {
-		response = await fetch(quizServiceUrl(path), {
+		response = await fetch(await quizServiceUrl(path), {
 			...options,
 			headers: {
 				'x-internal-key': process.env.INTERNAL_API_KEY,

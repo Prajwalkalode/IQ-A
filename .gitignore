@@ -3,3 +3,10 @@ node_modules/
 .env.*
 !.env.example
 copilot.md
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars

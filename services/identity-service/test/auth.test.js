@@ -5,7 +5,7 @@ const { after, before, beforeEach, describe, it } = require('node:test');
 
 process.env.JWT_SECRET = 'identity-service-test-secret';
 
-const User = require('../src/models/User');
+const userRepository = require('../src/repositories/userRepository');
 const app = require('../src/app');
 const { request, startServer } = require('../http-helper');
 
@@ -13,20 +13,26 @@ const users = [];
 let server;
 let failFindOne = false;
 
-User.create = async (data) => {
+userRepository.create = async (data) => {
 	const email = data.email.toLowerCase();
 	if (users.some((user) => user.email === email)) {
 		const error = new Error('Duplicate email');
-		error.code = 11000;
+		error.name = 'ConditionalCheckFailedException';
 		throw error;
 	}
 
-	const user = new User({ ...data, email });
-	await user.validate();
+	const now = new Date().toISOString();
+	const user = {
+		_id: String(users.length + 1).padStart(24, '0'),
+		...data,
+		email,
+		createdAt: now,
+		updatedAt: now,
+	};
 	users.push(user);
 	return user;
 };
-User.findOne = async ({ email }) => {
+userRepository.findByEmail = async (email) => {
 	if (failFindOne) {
 		throw new Error('Database unavailable');
 	}
@@ -83,12 +89,15 @@ describe('identity-service HTTP routes', () => {
 
 	it('login issues role claims and /me requires a valid bearer token', async () => {
 		const passwordHash = await bcrypt.hash('TeacherPass123', 10);
-		users.push(new User({
+		users.push({
+			_id: '000000000000000000000002',
 			email: 'teacher@example.com',
 			passwordHash,
 			name: 'Teacher',
 			role: 'teacher',
-		}));
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+		});
 
 		assert.equal((await request(server.baseUrl, '/auth/login', {
 			method: 'POST',

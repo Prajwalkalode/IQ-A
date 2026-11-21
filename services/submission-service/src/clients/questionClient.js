@@ -1,3 +1,5 @@
+const { resolveServiceUrl } = require('./serviceUrl');
+
 class QuestionServiceError extends Error {
 	constructor(message, cause) {
 		super(message, { cause });
@@ -6,13 +8,13 @@ class QuestionServiceError extends Error {
 	}
 }
 
-function questionServiceUrl(path) {
-	const baseUrl = process.env.QUESTION_SERVICE_URL;
-	if (!baseUrl) {
-		throw new QuestionServiceError('QUESTION_SERVICE_URL is not configured');
-	}
-
-	return `${baseUrl.replace(/\/+$/, '')}${path}`;
+async function questionServiceUrl(path) {
+	const baseUrl = await resolveServiceUrl(
+		'QUESTION_SERVICE_URL',
+		'QUESTION_SERVICE_URL_PARAMETER',
+		QuestionServiceError,
+	);
+	return `${baseUrl}${path}`;
 }
 
 async function getAnswers(ids) {
@@ -22,7 +24,7 @@ async function getAnswers(ids) {
 
 	let response;
 	try {
-		response = await fetch(questionServiceUrl('/questions/internal/answers'), {
+		response = await fetch(await questionServiceUrl('/questions/internal/answers'), {
 			method: 'POST',
 			headers: {
 				'x-internal-key': process.env.INTERNAL_API_KEY,
