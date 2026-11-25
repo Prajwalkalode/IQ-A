@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: terraform-${{ github.repository }}
+  group: project-lifecycle-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:

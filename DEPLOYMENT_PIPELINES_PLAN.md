@@ -25,8 +25,8 @@ Terraform Cloud is not required.
 - `.github/workflows/destroy-project.yml` is implemented as a manually
   triggered workflow with an explicit destroy confirmation.
 - `.github/workflows/preserve-data.yml` and
-  `.github/workflows/reseed-data.yml` are manually triggered no-op placeholders;
-  they do not read or modify application data.
+  `.github/workflows/reseed-data.yml` implement manual compressed S3 snapshots
+  and validated DynamoDB restore operations.
 
 ## One-time prerequisites
 
@@ -106,37 +106,44 @@ not be managed by this disposable stack.
 
 Suggested workflow: `.github/workflows/preserve-data.yml`
 
-- [ ] Require writes to be paused while taking the backup.
-- [ ] Paginate through each DynamoDB table and write a versioned, compressed
+- [ ] Create the external S3 backup bucket, configure the
+  `DYNAMODB_BACKUP_BUCKET` repository variable, and grant the backup
+  permissions described below.
+- [x] Require confirmation that writes are paused while taking the backup.
+- [x] Paginate through each DynamoDB table and write a run-versioned, compressed
   data snapshot to a durable S3 backup location.
-- [ ] Keep table items and metadata out of workflow logs and ordinary build
+- [x] Keep table items out of workflow logs and ordinary build
   artifacts.
-- [ ] Record the snapshot timestamp and table names so a restore can select the
+- [x] Record the snapshot timestamp and table names so a restore can select the
   intended backup.
-- [ ] Verify that the uploaded snapshot can be read and parsed.
+- [x] Verify that the uploaded snapshot can be read and parsed.
 
 For a small, idle project, a paginated scan to S3 is a low-cost option. For a
 transactionally consistent point-in-time export, evaluate DynamoDB point-in-time
 recovery and export costs before enabling them.
 
-The S3 backup location must be outside the resources destroyed by Workflow 2.
-S3 storage incurs a small ongoing cost for retained snapshots.
+The S3 backup bucket is configured through the GitHub repository variable
+`DYNAMODB_BACKUP_BUCKET` and must be outside the resources destroyed by
+Workflow 2. Objects use S3-managed encryption. S3 storage incurs a small
+ongoing cost for retained snapshots.
 
 ## Workflow 4: Reseed data (optional)
 
 Suggested workflow: `.github/workflows/reseed-data.yml`
 
-- [ ] Require the project infrastructure to exist first; optionally run the
+- [x] Require the project infrastructure to exist first; run the
   deploy workflow before restoring.
-- [ ] Select a specific snapshot or the latest verified snapshot.
-- [ ] Wait for all DynamoDB tables to become active.
-- [ ] Validate the snapshot and write items using DynamoDB batch operations,
+- [x] Select a specific snapshot.
+- [x] Wait for all DynamoDB tables to become active.
+- [x] Validate the snapshot and write items using DynamoDB batch operations,
   respecting batch limits and retrying unprocessed items.
-- [ ] Report per-table item counts and fail if any table cannot be restored.
+- [x] Report per-table item counts and fail if any table cannot be restored.
 - [ ] Smoke-test representative read paths after restore.
 
-Terraform recreates table schemas; the backup contains table items. Keep the
-snapshot format compatible with the repository's table key schemas.
+Terraform recreates table schemas; the backup contains table items. Restore
+validates primary key schemas and upserts records without deleting unrelated
+existing items. Keep the snapshot format compatible with the repository's
+table key schemas.
 
 ## Cost and safety notes
 
@@ -148,12 +155,16 @@ snapshot format compatible with the repository's table key schemas.
   CloudWatch log retention can still incur charges while deployed.
 - Keep the destroy workflow separate from deployment, protect it with a
   confirmation or GitHub environment approval, and serialize Terraform
-  operations so deploy and destroy cannot run concurrently.
+  operations and data-pipeline runs so lifecycle workflows cannot overlap.
 - The deployment IAM user needs infrastructure-management permissions,
   including `iam:PassRole`, state bucket access, and SSM parameter management.
   Its access keys are long-lived; use a dedicated user, store keys only in
   GitHub Actions secrets, and rotate them. Backup and restore permissions can
-  be limited to DynamoDB and the S3 backup location.
+  be limited to `dynamodb:DescribeTable`, `dynamodb:Scan`, and
+  `dynamodb:BatchWriteItem` on the five project tables, plus `s3:GetObject` and
+  `s3:PutObject` under `snapshots/*` in the external backup bucket. Larger
+  multipart snapshots also require `s3:AbortMultipartUpload` and
+  `s3:ListMultipartUploadParts`.
 
 ## Completion criteria
 
