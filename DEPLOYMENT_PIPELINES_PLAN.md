@@ -24,6 +24,9 @@ Terraform Cloud is not required.
   workflow with separate package, Lambda configuration, and deployment steps.
 - `.github/workflows/destroy-project.yml` is implemented as a manually
   triggered workflow with an explicit destroy confirmation.
+- `.github/workflows/preserve-data.yml` and
+  `.github/workflows/reseed-data.yml` are manually triggered no-op placeholders;
+  they do not read or modify application data.
 
 ## One-time prerequisites
 
