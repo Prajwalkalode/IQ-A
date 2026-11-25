@@ -12,9 +12,9 @@ on:
         required: true
         type: choice
         options:
-          - cancel
-          - restore
-        default: cancel
+          - 'cancel'
+          - 'restore'
+        default: 'cancel'
 
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 60
     env:
       AWS_REGION: ap-south-1
-      DYNAMODB_BACKUP_BUCKET: ${{ vars.DYNAMODB_BACKUP_BUCKET }}
+      DYNAMODB_BACKUP_BUCKET: ${{ vars.DYNAMODB_BACKUP_BUCKET || secrets.DYNAMODB_BACKUP_BUCKET }}
     steps:
       - name: Require explicit restore confirmation
         env:

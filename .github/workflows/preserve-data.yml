@@ -8,9 +8,9 @@ on:
         required: true
         type: choice
         options:
-          - no
-          - yes
-        default: no
+          - 'no'
+          - 'yes'
+        default: 'no'
 
 permissions:
   contents: read
@@ -26,13 +26,13 @@ jobs:
     timeout-minutes: 60
     env:
       AWS_REGION: ap-south-1
-      DYNAMODB_BACKUP_BUCKET: ${{ vars.DYNAMODB_BACKUP_BUCKET }}
+      DYNAMODB_BACKUP_BUCKET: ${{ vars.DYNAMODB_BACKUP_BUCKET || secrets.DYNAMODB_BACKUP_BUCKET }}
     steps:
       - name: Require writes-paused confirmation
         env:
           CONFIRM_WRITES_PAUSED: ${{ inputs.confirm_writes_paused }}
         run: |
-          if [ "$CONFIRM_WRITES_PAUSED" != "yes" ]; then
+          if [ "$CONFIRM_WRITES_PAUSED" != "yes" ] && [ "$CONFIRM_WRITES_PAUSED" != "true" ]; then
             echo "::error::Pause application writes and select yes before creating a snapshot."
             exit 1
           fi

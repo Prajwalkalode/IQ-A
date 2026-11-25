@@ -59,7 +59,9 @@ assignments, and submissions. Before using them:
 - Create a separate S3 bucket that is not managed by the project Terraform
   stack, then set the GitHub repository variable `DYNAMODB_BACKUP_BUCKET` to
   its name. The bucket must be in `ap-south-1`. Keep it even when destroying
-  the application infrastructure.
+  the application infrastructure. If it was added as a GitHub Actions secret
+  instead, the workflows also accept it there; the bucket name itself is not
+  sensitive.
 - Ensure the AWS deployment user can describe and scan the five DynamoDB
   tables, batch-write items to those tables, and get/put objects under
   `snapshots/*` in the backup bucket. Multipart upload permissions
