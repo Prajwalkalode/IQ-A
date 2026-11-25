@@ -1,0 +1,15 @@
+name: Reseed data
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reseed-data:
+    name: Reseed data (placeholder)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Placeholder
+        run: echo "Placeholder only; no data was restored."
