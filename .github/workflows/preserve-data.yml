@@ -1,0 +1,15 @@
+name: Preserve data
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preserve-data:
+    name: Preserve data (placeholder)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Placeholder
+        run: echo "Placeholder only; no data was backed up."
