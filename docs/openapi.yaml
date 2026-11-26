@@ -1,0 +1,1454 @@
+openapi: 3.0.3
+info:
+  title: IQ-A Service APIs
+  version: 1.1.0
+  description: |
+    OpenAPI documentation for the identity, question, quiz, and submission
+    services. Each service is deployed as a separate API Gateway HTTP API.
+    Replace each server hostname with its Terraform output:
+    `identity_api_endpoint`, `question_api_endpoint`, `quiz_api_endpoint`,
+    or `submission_api_endpoint`.
+tags:
+  - name: Identity
+  - name: Questions
+  - name: Quiz
+  - name: Submissions
+  - name: Health
+servers:
+  - url: https://replace-with-identity-api-id.execute-api.ap-south-1.amazonaws.com
+    description: Identity service; replace with Terraform output `identity_api_endpoint`.
+  - url: https://replace-with-question-api-id.execute-api.ap-south-1.amazonaws.com
+    description: Question service; replace with Terraform output `question_api_endpoint`.
+  - url: https://replace-with-quiz-api-id.execute-api.ap-south-1.amazonaws.com
+    description: Quiz service; replace with Terraform output `quiz_api_endpoint`.
+  - url: https://replace-with-submission-api-id.execute-api.ap-south-1.amazonaws.com
+    description: Submission service; replace with Terraform output `submission_api_endpoint`.
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Check service health
+      description: This route is available on all four service APIs.
+      responses:
+        '200':
+          description: The service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                identity:
+                  value: { status: identity-service ok }
+                question:
+                  value: { status: question-service ok }
+                quiz:
+                  value: { status: quiz-service ok }
+                submission:
+                  value: { status: submission-service ok }
+
+  /auth/signup:
+    post:
+      tags: [Identity]
+      summary: Create a student account
+      servers:
+        - url: https://replace-with-identity-api-id.execute-api.ap-south-1.amazonaws.com
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+      responses:
+        '201':
+          description: Student account created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example: { message: Signup successful }
+        '400':
+          description: Email, password, and name are required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The email is already registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/login:
+    post:
+      tags: [Identity]
+      summary: Authenticate and issue a JWT
+      servers:
+        - url: https://replace-with-identity-api-id.execute-api.ap-south-1.amazonaws.com
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Credentials accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Credentials are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/teachers:
+    post:
+      tags: [Identity]
+      summary: Create a teacher account
+      description: Requires an administrator JWT.
+      servers:
+        - url: https://replace-with-identity-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeacherRequest'
+      responses:
+        '201':
+          description: Teacher account created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example: { message: Teacher account created }
+        '400':
+          description: Email, password, and name are required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The email is already registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/me:
+    get:
+      tags: [Identity]
+      summary: Get the authenticated user's identity
+      servers:
+        - url: https://replace-with-identity-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Authenticated user identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /questions:
+    get:
+      tags: [Questions]
+      summary: List questions
+      description: Requires an administrator or teacher JWT.
+      servers:
+        - url: https://replace-with-question-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: 1-based page number. Defaults to 1.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Requested page size; values above 100 are capped at 100.
+          schema:
+            type: integer
+            minimum: 1
+            default: 20
+        - name: topic
+          in: query
+          description: Optional topic filter; trimmed and lowercased by the service.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Page of questions and total matching count.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionPage'
+        '400':
+          description: Page and limit must be positive integers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [Questions]
+      summary: Create a question
+      description: Requires an administrator or teacher JWT. The creator is taken from the token.
+      servers:
+        - url: https://replace-with-question-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuestionInput'
+      responses:
+        '201':
+          description: Created question.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Question'
+        '400':
+          description: Question data failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /questions/internal/random:
+    get:
+      tags: [Questions]
+      summary: Select random questions for an internal service
+      description: Requires the internal API key. Correct answers are never returned.
+      servers:
+        - url: https://replace-with-question-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - internalApiKey: []
+      parameters:
+        - name: count
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: topic
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Selected questions. `available` is present when fewer than requested exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RandomQuestionsResponse'
+        '400':
+          description: Count must be a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /questions/internal/count:
+    get:
+      tags: [Questions]
+      summary: Count available questions for an internal service
+      servers:
+        - url: https://replace-with-question-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - internalApiKey: []
+      parameters:
+        - name: topic
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Number of questions matching the optional topic.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available]
+                properties:
+                  available:
+                    type: integer
+                    minimum: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /questions/internal/answers:
+    post:
+      tags: [Questions]
+      summary: Get correct answer indexes for an internal service
+      servers:
+        - url: https://replace-with-question-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - internalApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: string
+                    pattern: '^[a-fA-F0-9]{24}$'
+      responses:
+        '200':
+          description: Matching question IDs and correct answer indexes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AnswerKeyItem'
+        '400':
+          description: IDs must be an array of valid 24-character hexadecimal question IDs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /questions/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: 24-character hexadecimal question ID.
+        schema:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+    get:
+      tags: [Questions]
+      summary: Get a question by ID
+      servers:
+        - url: https://replace-with-question-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Question details, including the correct answer index.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Question'
+        '400':
+          description: Invalid question ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Question not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      tags: [Questions]
+      summary: Update a question
+      description: Requires an administrator or teacher JWT. Only supplied fields are updated; `createdBy` cannot be changed. An empty object is valid and leaves question content unchanged.
+      servers:
+        - url: https://replace-with-question-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuestionUpdate'
+      responses:
+        '200':
+          description: Updated question.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Question'
+        '400':
+          description: Invalid question ID or question data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Question not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags: [Questions]
+      summary: Delete a question
+      servers:
+        - url: https://replace-with-question-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Question deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example: { message: Question deleted }
+        '400':
+          description: Invalid question ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Question not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /quiz:
+    get:
+      tags: [Quiz]
+      summary: List quizzes available to the manager
+      description: Administrators receive all quizzes; teachers receive quizzes they created.
+      servers:
+        - url: https://replace-with-quiz-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Quizzes ordered newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuizSession'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [Quiz]
+      summary: Create a quiz
+      description: Requires an administrator or teacher JWT. The creator comes from the token.
+      servers:
+        - url: https://replace-with-quiz-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateQuizRequest'
+      responses:
+        '201':
+          description: Created quiz session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizSession'
+        '400':
+          description: Invalid quiz data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Quiz ID already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Not enough questions are available.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsufficientQuestionsResponse'
+        '502':
+          description: Question service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /quiz/internal/assignment:
+    get:
+      tags: [Quiz]
+      summary: Get a student's quiz assignment for an internal service
+      servers:
+        - url: https://replace-with-quiz-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - internalApiKey: []
+      parameters:
+        - name: quizId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: studentEmail
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Assignment identifiers and score visibility.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalAssignment'
+        '400':
+          description: Quiz ID and student email are required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Assignment or quiz not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /quiz/internal/assignment/complete:
+    post:
+      tags: [Quiz]
+      summary: Mark a student's assignment completed for an internal service
+      servers:
+        - url: https://replace-with-quiz-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - internalApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quizId, studentEmail]
+              properties:
+                quizId:
+                  type: string
+                studentEmail:
+                  type: string
+      responses:
+        '200':
+          description: Assignment completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [quizId, status]
+                properties:
+                  quizId:
+                    type: string
+                  status:
+                    type: string
+                    enum: [completed]
+        '400':
+          description: Quiz ID and student email are required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Assignment not found or already completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /quiz/internal/session:
+    get:
+      tags: [Quiz]
+      summary: Get quiz session metadata for an internal service
+      servers:
+        - url: https://replace-with-quiz-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - internalApiKey: []
+      parameters:
+        - name: quizId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Quiz session metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalQuizSession'
+        '400':
+          description: Quiz ID is required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Quiz not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /quiz/{quizId}:
+    parameters:
+      - name: quizId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    get:
+      tags: [Quiz]
+      summary: Get a quiz
+      description: Requires an administrator or teacher JWT. Teachers can only access quizzes they created.
+      servers:
+        - url: https://replace-with-quiz-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Quiz session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizSession'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Quiz not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      tags: [Quiz]
+      summary: Update quiz visibility or active status
+      description: Requires an administrator or teacher JWT. Teachers can only update their own quizzes. An empty object returns the current quiz unchanged.
+      servers:
+        - url: https://replace-with-quiz-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuizUpdate'
+      responses:
+        '200':
+          description: Updated quiz session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizSession'
+        '400':
+          description: Invalid update values.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Quiz not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags: [Quiz]
+      summary: Delete a quiz without student assignments
+      description: Requires an administrator or teacher JWT. Teachers can only delete their own quizzes.
+      servers:
+        - url: https://replace-with-quiz-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Quiz deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example: { message: Quiz deleted }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Quiz not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Quiz has student attempts and must be deactivated instead.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /quiz/{quizId}/start:
+    post:
+      tags: [Quiz]
+      summary: Start or resume a quiz as a student
+      servers:
+        - url: https://replace-with-quiz-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: quizId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '201':
+          description: New assignment created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizStartResponse'
+        '200':
+          description: Existing incomplete assignment returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizStartResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller is not a student, or quiz is inactive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Quiz not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Quiz already completed or not enough questions remain available.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Question service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /submissions:
+    post:
+      tags: [Submissions]
+      summary: Submit answers for a quiz
+      description: Requires a student JWT. Score fields are included only when the quiz allows score revelation.
+      servers:
+        - url: https://replace-with-submission-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitAnswersRequest'
+      responses:
+        '201':
+          description: Answers submitted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitAnswersResponse'
+        '400':
+          description: Invalid body, duplicate answer IDs, or answers for unassigned questions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Quiz has not been started.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Already submitted or quiz assignment already completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: An upstream quiz or question service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /submissions/quiz/{quizId}/mine:
+    get:
+      tags: [Submissions]
+      summary: Get the authenticated student's submission
+      servers:
+        - url: https://replace-with-submission-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: quizId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: Submission status and, when allowed, score summary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MySubmissionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Quiz service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /submissions/quiz/{quizId}:
+    get:
+      tags: [Submissions]
+      summary: Get quiz submission results
+      description: Requires an administrator or teacher JWT. Teachers can only access results for their own quizzes.
+      servers:
+        - url: https://replace-with-submission-api-id.execute-api.ap-south-1.amazonaws.com
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: quizId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: Submission summary and per-student score data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizSubmissionsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Quiz not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Quiz service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT returned by `POST /auth/login`.
+    internalApiKey:
+      type: apiKey
+      in: header
+      name: x-internal-key
+      description: Internal service key configured with `INTERNAL_API_KEY`.
+  responses:
+    Unauthorized:
+      description: Missing or invalid authentication.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: { error: Unauthorized }
+    Forbidden:
+      description: Authenticated caller does not have the required role or ownership.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: { error: Forbidden }
+    InternalServerError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: { error: Internal server error }
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        offendingIds:
+          type: array
+          items:
+            type: string
+    MessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: identity-service ok
+    SignupRequest:
+      type: object
+      required: [email, password, name]
+      properties:
+        email:
+          type: string
+          example: student@example.com
+        password:
+          type: string
+          format: password
+          example: Pass12345
+        name:
+          type: string
+          example: Alex Student
+        role:
+          type: string
+          description: Ignored for signup; new accounts always receive the student role.
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          example: student@example.com
+        password:
+          type: string
+          format: password
+    TeacherRequest:
+      type: object
+      required: [email, password, name]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+          format: password
+        name:
+          type: string
+    TokenResponse:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: JWT valid for one hour.
+    MeResponse:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+        role:
+          $ref: '#/components/schemas/UserRole'
+    UserRole:
+      type: string
+      enum: [admin, teacher, student]
+    QuestionInput:
+      type: object
+      required: [text, options, correctIndex]
+      properties:
+        text:
+          type: string
+          minLength: 1
+        options:
+          type: array
+          minItems: 2
+          maxItems: 6
+          items:
+            type: string
+            minLength: 1
+        correctIndex:
+          oneOf:
+            - type: integer
+            - type: string
+          description: Zero-based index of the correct option. An integer is recommended; the service also coerces numeric strings.
+        topic:
+          type: string
+          description: Optional; trimmed and lowercased by the service.
+    QuestionUpdate:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 1
+        options:
+          type: array
+          minItems: 2
+          maxItems: 6
+          items:
+            type: string
+            minLength: 1
+        correctIndex:
+          oneOf:
+            - type: integer
+            - type: string
+        topic:
+          type: string
+    Question:
+      type: object
+      required: [_id, text, options, correctIndex, createdBy, createdAt, updatedAt]
+      properties:
+        _id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+        text:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+        correctIndex:
+          type: integer
+          minimum: 0
+        topic:
+          type: string
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        __v:
+          type: integer
+    QuestionPage:
+      type: object
+      required: [questions, total, page, limit]
+      properties:
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Question'
+        total:
+          type: integer
+          minimum: 0
+        page:
+          type: integer
+          minimum: 1
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+    PublicQuestion:
+      type: object
+      required: [_id, text, options]
+      properties:
+        _id:
+          type: string
+        text:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+    RandomQuestionsResponse:
+      type: object
+      required: [questions]
+      properties:
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuizAssignmentQuestion'
+    QuizAssignmentQuestion:
+      type: object
+      required: [questionId, text, options]
+      properties:
+        questionId:
+          type: string
+        text:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+        available:
+          type: integer
+          minimum: 0
+          description: Included only when fewer questions are available than requested.
+    AnswerKeyItem:
+      type: object
+      required: [_id, correctIndex]
+      properties:
+        _id:
+          type: string
+        correctIndex:
+          type: integer
+    QuizSession:
+      type: object
+      required:
+        - _id
+        - quizId
+        - questionCount
+        - revealScore
+        - createdBy
+        - isActive
+        - createdAt
+        - updatedAt
+      properties:
+        _id:
+          type: string
+        quizId:
+          type: string
+          minLength: 3
+          maxLength: 40
+        questionCount:
+          type: integer
+          minimum: 1
+          maximum: 100
+        revealScore:
+          type: boolean
+        topic:
+          type: string
+        createdBy:
+          type: string
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        __v:
+          type: integer
+    CreateQuizRequest:
+      type: object
+      required: [quizId, questionCount]
+      properties:
+        quizId:
+          type: string
+          minLength: 3
+          maxLength: 40
+          description: Trimmed and lowercased before validation; use a lowercase kebab-case ID and do not use the reserved ID `internal`.
+        questionCount:
+          type: integer
+          minimum: 1
+          maximum: 100
+        revealScore:
+          type: boolean
+          default: false
+        topic:
+          type: string
+    QuizUpdate:
+      type: object
+      properties:
+        revealScore:
+          type: boolean
+        isActive:
+          type: boolean
+    InternalQuizSession:
+      type: object
+      required: [quizId, createdBy, questionCount, revealScore, isActive]
+      properties:
+        quizId:
+          type: string
+        createdBy:
+          type: string
+        questionCount:
+          type: integer
+        revealScore:
+          type: boolean
+        isActive:
+          type: boolean
+    InternalAssignment:
+      type: object
+      required: [quizId, studentEmail, status, questionIds, revealScore]
+      properties:
+        quizId:
+          type: string
+        studentEmail:
+          type: string
+        status:
+          type: string
+          enum: [assigned, completed]
+        questionIds:
+          type: array
+          items:
+            type: string
+        revealScore:
+          type: boolean
+    QuizStartResponse:
+      type: object
+      required: [quizId, questionCount, status, questions]
+      properties:
+        quizId:
+          type: string
+        questionCount:
+          type: integer
+        status:
+          type: string
+          enum: [assigned, completed]
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicQuestion'
+    InsufficientQuestionsResponse:
+      type: object
+      required: [error, requested, available]
+      properties:
+        error:
+          type: string
+          example: Not enough questions available
+        requested:
+          type: integer
+        available:
+          type: integer
+    SubmitAnswer:
+      type: object
+      required: [questionId, selectedIndex]
+      properties:
+        questionId:
+          type: string
+        selectedIndex:
+          type: integer
+          minimum: 0
+          maximum: 5
+          nullable: true
+    SubmitAnswersRequest:
+      type: object
+      required: [quizId, answers]
+      properties:
+        quizId:
+          type: string
+          minLength: 1
+        answers:
+          type: array
+          maxItems: 100
+          description: Each questionId must be unique within the array.
+          items:
+            $ref: '#/components/schemas/SubmitAnswer'
+    SubmitAnswersResponse:
+      type: object
+      required: [message, submittedAt]
+      properties:
+        message:
+          type: string
+          enum: [Submitted]
+        submittedAt:
+          type: string
+          format: date-time
+        score:
+          type: integer
+          description: Present only if the quiz reveals scores.
+        total:
+          type: integer
+          description: Present only if the quiz reveals scores.
+        percentage:
+          type: integer
+          nullable: true
+          description: Present only if the quiz reveals scores.
+    MySubmissionResponse:
+      type: object
+      required: [quizId, submittedAt, status]
+      properties:
+        quizId:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [submitted]
+        score:
+          type: integer
+          description: Present only if the quiz reveals scores.
+        total:
+          type: integer
+          description: Present only if the quiz reveals scores.
+        percentage:
+          type: integer
+          nullable: true
+          description: Present only if the quiz reveals scores.
+    QuizSubmissionsResponse:
+      type: object
+      required: [quizId, summary, submissions]
+      properties:
+        quizId:
+          type: string
+        summary:
+          type: object
+          required: [submissions, averagePercentage]
+          properties:
+            submissions:
+              type: integer
+              minimum: 0
+            averagePercentage:
+              type: number
+              nullable: true
+        submissions:
+          type: array
+          items:
+            type: object
+            required:
+              - studentEmail
+              - score
+              - total
+              - percentage
+              - voided
+              - submittedAt
+            properties:
+              studentEmail:
+                type: string
+              score:
+                type: integer
+              total:
+                type: integer
+              percentage:
+                type: integer
+                nullable: true
+              voided:
+                type: integer
+              submittedAt:
+                type: string
+                format: date-time
