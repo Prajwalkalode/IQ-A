@@ -64,7 +64,9 @@ assignments, and submissions. Before using them:
   sensitive.
 - Ensure the AWS deployment user can describe and scan the five DynamoDB
   tables, batch-write items to those tables, and get/put objects under
-  `snapshots/*` in the backup bucket. Multipart upload permissions
+  `snapshots/*` in the backup bucket. Grant `s3:ListBucket` on the bucket
+  restricted to the `snapshots/` prefix so the integrated deploy workflow can
+  find the newest completed snapshot. Multipart upload permissions
   (`s3:AbortMultipartUpload` and `s3:ListMultipartUploadParts`) are also needed
   for larger compressed snapshots.
 - Pause application writes before running `Preserve data`, then select `yes`
@@ -75,6 +77,15 @@ assignments, and submissions. Before using them:
   the successful backup run and select `restore`. Restore validates the
   snapshot and table key schemas, retries unprocessed batches, and reports
   counts without logging table contents.
+- `Deploy project` has an optional **Reseed data** checkbox. When selected, it
+  restores the latest completed backup by default; set `snapshot_id` to a
+  specific run-based snapshot ID to restore another one. If unchecked, deploy
+  does not restore data. Newly created tables are blank, while existing table
+  contents are left untouched.
+- `Destroy project` has an optional **Preserve data** checkbox. When selected,
+  it backs up all five tables before applying the Terraform destroy plan. Pause
+  application writes and confirm that in the workflow input; a failed backup
+  prevents destruction.
 
 Snapshots are gzip-compressed, identified by unique run-based IDs, and uploaded
 with S3 server-side encryption. Restore upserts snapshot items: matching keys

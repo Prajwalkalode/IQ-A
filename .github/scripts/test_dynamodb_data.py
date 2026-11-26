@@ -4,6 +4,7 @@ import io
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -101,6 +102,43 @@ class DynamoDbDataTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "invalid object key"):
             dynamodb_data._validate_manifest(manifest, snapshot_id)
+
+    def test_latest_snapshot_selects_newest_completed_manifest(self):
+        first_id = "20261125T120000Z-123-1"
+        second_id = "20261125T130000Z-456-1"
+        s3 = Mock()
+        s3.get_paginator.return_value.paginate.return_value = [
+            {
+                "Contents": [
+                    {
+                        "Key": dynamodb_data.object_key(first_id, "manifest.json"),
+                        "LastModified": datetime(2026, 11, 25, 12, tzinfo=timezone.utc),
+                    },
+                    {
+                        "Key": dynamodb_data.object_key(second_id, "manifest.json"),
+                        "LastModified": datetime(2026, 11, 25, 13, tzinfo=timezone.utc),
+                    },
+                    {
+                        "Key": "snapshots/incomplete/users.jsonl.gz",
+                        "LastModified": datetime(2026, 11, 25, 14, tzinfo=timezone.utc),
+                    },
+                ]
+            }
+        ]
+
+        self.assertEqual(
+            dynamodb_data._latest_snapshot_id(s3, "backup-bucket"),
+            second_id,
+        )
+
+    def test_latest_snapshot_fails_when_no_completed_manifest_exists(self):
+        s3 = Mock()
+        s3.get_paginator.return_value.paginate.return_value = [
+            {"Contents": [{"Key": "snapshots/incomplete/users.jsonl.gz"}]}
+        ]
+
+        with self.assertRaisesRegex(ValueError, "No completed snapshots"):
+            dynamodb_data._latest_snapshot_id(s3, "backup-bucket")
 
     def test_batch_write_retries_unprocessed_items(self):
         dynamodb = Mock()

@@ -64,7 +64,11 @@ Trigger it manually with `workflow_dispatch`.
 - [x] Package each service for Lambda, configure its application secrets, and
   upload the packages in separate pipeline steps. Each package uses
   `src/handler.handler` as its entry point.
+- [x] Offer optional data reseeding during deployment, defaulting to the latest
+  completed snapshot while allowing a specific snapshot ID.
 - [x] Run post-deployment health checks against each API.
+- [ ] Add smoke tests for representative service API routes after receiving
+  the deployed API paths and expected request/response behavior.
 
 SSM parameters can be Terraform resources whose values reference the API
 endpoints, so Terraform creates or updates them after the APIs are ready. API
@@ -95,6 +99,7 @@ operations.
 - [x] Initialize Terraform using the same persistent state backend.
 - [x] Show the destroy plan and require selecting `destroy` to confirm.
 - [x] Apply the destroy plan for the application stack.
+- [x] Offer optional data preservation before applying the destroy plan.
 - [ ] Verify that DynamoDB tables (including their data), Lambda functions and
   deployed code, API Gateway APIs, logs, and SSM endpoint parameters are
   removed.
@@ -107,7 +112,7 @@ not be managed by this disposable stack.
 Suggested workflow: `.github/workflows/preserve-data.yml`
 
 - [ ] Create the external S3 backup bucket, configure the
-  `DYNAMODB_BACKUP_BUCKET` repository variable, and grant the backup
+  `DYNAMODB_BACKUP_BUCKET` repository variable or secret, and grant the backup
   permissions described below.
 - [x] Require confirmation that writes are paused while taking the backup.
 - [x] Paginate through each DynamoDB table and write a run-versioned, compressed
@@ -122,8 +127,8 @@ For a small, idle project, a paginated scan to S3 is a low-cost option. For a
 transactionally consistent point-in-time export, evaluate DynamoDB point-in-time
 recovery and export costs before enabling them.
 
-The S3 backup bucket is configured through the GitHub repository variable
-`DYNAMODB_BACKUP_BUCKET` and must be outside the resources destroyed by
+The S3 backup bucket is configured through the GitHub repository variable or
+secret `DYNAMODB_BACKUP_BUCKET` and must be outside the resources destroyed by
 Workflow 2. Objects use S3-managed encryption. S3 storage incurs a small
 ongoing cost for retained snapshots.
 
@@ -133,7 +138,8 @@ Suggested workflow: `.github/workflows/reseed-data.yml`
 
 - [x] Require the project infrastructure to exist first; run the
   deploy workflow before restoring.
-- [x] Select a specific snapshot.
+- [x] Select a specific snapshot; integrated deploy defaults to the latest
+  completed snapshot.
 - [x] Wait for all DynamoDB tables to become active.
 - [x] Validate the snapshot and write items using DynamoDB batch operations,
   respecting batch limits and retrying unprocessed items.
@@ -164,7 +170,9 @@ table key schemas.
   `dynamodb:BatchWriteItem` on the five project tables, plus `s3:GetObject` and
   `s3:PutObject` under `snapshots/*` in the external backup bucket. Larger
   multipart snapshots also require `s3:AbortMultipartUpload` and
-  `s3:ListMultipartUploadParts`.
+  `s3:ListMultipartUploadParts`. Integrated deployment also needs
+  `s3:ListBucket` on the backup bucket restricted to the `snapshots/` prefix to
+  select the latest completed snapshot.
 
 ## Completion criteria
 

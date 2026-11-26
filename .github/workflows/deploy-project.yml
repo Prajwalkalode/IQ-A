@@ -2,6 +2,17 @@ name: Deploy project
 
 on:
   workflow_dispatch:
+    inputs:
+      reseed_data:
+        description: Restore data from an S3 snapshot after deployment.
+        required: true
+        type: boolean
+        default: false
+      snapshot_id:
+        description: Snapshot ID to restore, or "latest" to use the newest completed snapshot.
+        required: false
+        type: string
+        default: latest
 
 permissions:
   contents: read
@@ -19,6 +30,9 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     environment: deploy
+    env:
+      AWS_REGION: ap-south-1
+      DYNAMODB_BACKUP_BUCKET: ${{ vars.DYNAMODB_BACKUP_BUCKET || secrets.DYNAMODB_BACKUP_BUCKET }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -130,6 +144,50 @@ jobs:
             printf '%s' "$response" | jq --exit-status --arg expected "$expected" '.status == $expected' > /dev/null
             echo "$service API health check passed"
           done
+
+      - name: Require backup bucket configuration
+        if: ${{ inputs.reseed_data }}
+        run: |
+          if [ -z "$DYNAMODB_BACKUP_BUCKET" ]; then
+            echo "::error::Set the DYNAMODB_BACKUP_BUCKET repository variable or secret."
+            exit 1
+          fi
+
+      - name: Set up Python for data restore
+        if: ${{ inputs.reseed_data }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install data-pipeline dependencies
+        if: ${{ inputs.reseed_data }}
+        run: python -m pip install -r .github/scripts/requirements-data-pipelines.txt
+
+      - name: Read DynamoDB table names for restore
+        if: ${{ inputs.reseed_data }}
+        run: |
+          set -euo pipefail
+
+          while IFS='=' read -r env_name output_name; do
+            table_name="$(terraform -chdir=terraform output -raw "$output_name")"
+            if [[ ! "$table_name" =~ ^[A-Za-z0-9_.-]{3,255}$ ]]; then
+              echo "::error::Terraform returned an invalid table name for $output_name."
+              exit 1
+            fi
+            echo "$env_name=$table_name" >> "$GITHUB_ENV"
+          done <<'EOF'
+          USERS_TABLE=identity_users_table_name
+          QUESTIONS_TABLE=question_questions_table_name
+          QUIZ_SESSIONS_TABLE=quiz_sessions_table_name
+          QUIZ_ASSIGNMENTS_TABLE=quiz_assignments_table_name
+          SUBMISSIONS_TABLE=submission_table_name
+          EOF
+
+      - name: Restore selected snapshot
+        if: ${{ inputs.reseed_data }}
+        env:
+          SNAPSHOT_ID: ${{ inputs.snapshot_id || 'latest' }}
+        run: python .github/scripts/dynamodb_data.py reseed --snapshot-id "$SNAPSHOT_ID"
 
       - name: Clean up deployment packages
         if: always()

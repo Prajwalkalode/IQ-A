@@ -8,9 +8,22 @@ on:
         required: true
         type: choice
         options:
-          - cancel
-          - destroy
-        default: cancel
+          - 'cancel'
+          - 'destroy'
+        default: 'cancel'
+      preserve_data:
+        description: Back up all DynamoDB data to the external S3 bucket before destroying infrastructure.
+        required: true
+        type: boolean
+        default: false
+      confirm_writes_paused:
+        description: Required only when preserving data; confirm application writes are paused.
+        required: true
+        type: choice
+        options:
+          - 'no'
+          - 'yes'
+        default: 'no'
 
 permissions:
   contents: read
@@ -24,6 +37,10 @@ jobs:
     name: Destroy project infrastructure
     runs-on: ubuntu-latest
     environment: destroy
+    timeout-minutes: 60
+    env:
+      AWS_REGION: ap-south-1
+      DYNAMODB_BACKUP_BUCKET: ${{ vars.DYNAMODB_BACKUP_BUCKET || secrets.DYNAMODB_BACKUP_BUCKET }}
     steps:
       - name: Require explicit confirmation
         env:
@@ -52,6 +69,65 @@ jobs:
       - name: Initialize Terraform
         working-directory: terraform
         run: terraform init -input=false -lockfile=readonly
+
+      - name: Require backup bucket configuration
+        if: ${{ inputs.preserve_data }}
+        run: |
+          if [ -z "$DYNAMODB_BACKUP_BUCKET" ]; then
+            echo "::error::Set the DYNAMODB_BACKUP_BUCKET repository variable or secret."
+            exit 1
+          fi
+
+      - name: Require writes-paused confirmation
+        if: ${{ inputs.preserve_data }}
+        env:
+          CONFIRM_WRITES_PAUSED: ${{ inputs.confirm_writes_paused }}
+        run: |
+          if [ "$CONFIRM_WRITES_PAUSED" != "yes" ] && [ "$CONFIRM_WRITES_PAUSED" != "true" ]; then
+            echo "::error::Pause application writes and select yes before creating a snapshot."
+            exit 1
+          fi
+
+      - name: Read DynamoDB table names for backup
+        if: ${{ inputs.preserve_data }}
+        run: |
+          set -euo pipefail
+
+          while IFS='=' read -r env_name output_name; do
+            table_name="$(terraform -chdir=terraform output -raw "$output_name")"
+            if [[ ! "$table_name" =~ ^[A-Za-z0-9_.-]{3,255}$ ]]; then
+              echo "::error::Terraform returned an invalid table name for $output_name."
+              exit 1
+            fi
+            echo "$env_name=$table_name" >> "$GITHUB_ENV"
+          done <<'EOF'
+          USERS_TABLE=identity_users_table_name
+          QUESTIONS_TABLE=question_questions_table_name
+          QUIZ_SESSIONS_TABLE=quiz_sessions_table_name
+          QUIZ_ASSIGNMENTS_TABLE=quiz_assignments_table_name
+          SUBMISSIONS_TABLE=submission_table_name
+          EOF
+
+      - name: Set up Python for data backup
+        if: ${{ inputs.preserve_data }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install data-pipeline dependencies
+        if: ${{ inputs.preserve_data }}
+        run: python -m pip install -r .github/scripts/requirements-data-pipelines.txt
+
+      - name: Create snapshot ID
+        if: ${{ inputs.preserve_data }}
+        id: snapshot
+        run: echo "snapshot_id=$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+
+      - name: Preserve data before destruction
+        if: ${{ inputs.preserve_data }}
+        env:
+          SNAPSHOT_ID: ${{ steps.snapshot.outputs.snapshot_id }}
+        run: python .github/scripts/dynamodb_data.py preserve --snapshot-id "$SNAPSHOT_ID" --writes-paused
 
       - name: Plan infrastructure destruction
         working-directory: terraform
