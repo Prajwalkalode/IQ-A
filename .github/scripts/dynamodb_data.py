@@ -27,6 +27,9 @@ TABLE_ENV = {
 }
 SNAPSHOT_ID_PATTERN = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9]+-[0-9]+$")
 SNAPSHOT_PREFIX = "snapshots"
+SNAPSHOT_MANIFEST_KEY_PATTERN = re.compile(
+    rf"^{SNAPSHOT_PREFIX}/([0-9]{{8}}T[0-9]{{6}}Z-[0-9]+-[0-9]+)/manifest\.json$"
+)
 FORMAT_VERSION = 1
 MAX_BATCH_SIZE = 25
 MAX_UNPROCESSED_RETRIES = 8
@@ -213,6 +216,32 @@ def _manifest_for_snapshot(s3, bucket, snapshot_id):
         raise ValueError("Snapshot manifest is not valid JSON.") from error
 
 
+def _latest_snapshot_id(s3, bucket):
+    paginator = s3.get_paginator("list_objects_v2")
+    latest_snapshot = None
+    latest_modified = None
+
+    for page in paginator.paginate(
+        Bucket=bucket,
+        Prefix=f"{SNAPSHOT_PREFIX}/",
+    ):
+        for item in page.get("Contents", []):
+            key = item.get("Key", "")
+            match = SNAPSHOT_MANIFEST_KEY_PATTERN.fullmatch(key)
+            if not match:
+                continue
+            modified = item.get("LastModified")
+            if modified is None:
+                continue
+            if latest_modified is None or modified > latest_modified:
+                latest_snapshot = match.group(1)
+                latest_modified = modified
+
+    if latest_snapshot is None:
+        raise ValueError(f"No completed snapshots were found in s3://{bucket}/.")
+    return latest_snapshot
+
+
 def _validate_manifest(manifest, snapshot_id):
     if not isinstance(manifest, dict):
         raise ValueError("Snapshot manifest has an invalid structure.")
@@ -370,12 +399,16 @@ def _write_batch(dynamodb, table_name, items):
 
 
 def reseed_data(snapshot_id, bucket, region, table_names):
-    validate_snapshot_id(snapshot_id)
     if not bucket:
         raise ValueError("Set the DYNAMODB_BACKUP_BUCKET repository variable.")
 
-    dynamodb = boto3.client("dynamodb", region_name=region)
     s3 = boto3.client("s3", region_name=region)
+    if snapshot_id == "latest":
+        snapshot_id = _latest_snapshot_id(s3, bucket)
+        print(f"Selected latest completed snapshot: {snapshot_id}")
+    validate_snapshot_id(snapshot_id)
+
+    dynamodb = boto3.client("dynamodb", region_name=region)
     manifest = _manifest_for_snapshot(s3, bucket, snapshot_id)
     manifest_tables = _validate_manifest(manifest, snapshot_id)
 
