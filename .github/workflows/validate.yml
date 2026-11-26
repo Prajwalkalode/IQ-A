@@ -67,3 +67,23 @@ jobs:
       - name: Validate configuration
         working-directory: terraform
         run: terraform validate
+
+  data-pipelines:
+    name: Test data pipeline scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/scripts/requirements-data-pipelines.txt
+
+      - name: Install data-pipeline dependencies
+        run: python -m pip install -r .github/scripts/requirements-data-pipelines.txt
+
+      - name: Run data-pipeline unit tests
+        run: python -m unittest discover -s .github/scripts -p "test_*.py"

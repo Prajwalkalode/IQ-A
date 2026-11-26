@@ -50,6 +50,38 @@ infrastructure, including DynamoDB tables and their data, but leaves the
 separate Terraform state bucket in place. Configure the GitHub `destroy`
 environment with any desired branch restrictions or approval requirements.
 
+## DynamoDB backup and restore
+
+The manually triggered `Preserve data` and `Reseed data` workflows save and
+restore all five DynamoDB tables: users, questions, quiz sessions, quiz
+assignments, and submissions. Before using them:
+
+- Create a separate S3 bucket that is not managed by the project Terraform
+  stack, then set the GitHub repository variable `DYNAMODB_BACKUP_BUCKET` to
+  its name. The bucket must be in `ap-south-1`. Keep it even when destroying
+  the application infrastructure. If it was added as a GitHub Actions secret
+  instead, the workflows also accept it there; the bucket name itself is not
+  sensitive.
+- Ensure the AWS deployment user can describe and scan the five DynamoDB
+  tables, batch-write items to those tables, and get/put objects under
+  `snapshots/*` in the backup bucket. Multipart upload permissions
+  (`s3:AbortMultipartUpload` and `s3:ListMultipartUploadParts`) are also needed
+  for larger compressed snapshots.
+- Pause application writes before running `Preserve data`, then select `yes`
+  in its confirmation input. The workflow performs consistent paginated scans
+  and records a snapshot ID in the run summary. A scan is not a transactionally
+  consistent point-in-time export; writes must remain paused for the scan.
+- Deploy the project before running `Reseed data`. Provide the snapshot ID from
+  the successful backup run and select `restore`. Restore validates the
+  snapshot and table key schemas, retries unprocessed batches, and reports
+  counts without logging table contents.
+
+Snapshots are gzip-compressed, identified by unique run-based IDs, and uploaded
+with S3 server-side encryption. Restore upserts snapshot items: matching keys
+are overwritten and other existing items are left untouched. It does not clear
+tables. Store backups in a bucket with appropriate access controls and
+retention; S3 storage and requests can incur charges.
+
 ## Quiz service
 
 The quiz service uses DynamoDB tables provisioned by the Terraform quiz module.
