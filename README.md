@@ -167,6 +167,19 @@ The OpenAPI 3.0 specification for all four services is in
 corresponding Terraform API endpoint outputs before using Swagger UI or another
 OpenAPI client.
 
+## Frontend starter
+
+The React and TypeScript frontend starter is in `ui/`, scaffolded with Vite.
+It is the unmodified starter template and is not connected to the APIs yet.
+
+```powershell
+cd ui
+npm install
+npm run dev
+```
+
+Run `npm run build` and `npm run lint` from `ui/` to verify the frontend.
+
 ## Version history
 
 - **1.0 - Complete:** Four local services using MongoDB/Mongoose.
@@ -174,7 +187,8 @@ OpenAPI client.
   Terraform deployment, and data preservation/reseed workflows. Lifecycle
   verification remains tracked in the roadmap; contribution guidance keeps
   the README and roadmap synchronized.
-- **1.2 - Planned:** Student quiz discovery and account recovery.
+- **1.2 - In progress:** React/Vite frontend foundation created. Student quiz
+  discovery, account recovery, and API-connected screens remain planned.
 - **Future backlog:** Secure initial admin setup and automated live integration
   checks.
 
