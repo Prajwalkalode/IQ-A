@@ -159,3 +159,10 @@ and submission services resolve their peer URLs from SSM at runtime, caching
 them for the lifetime of the Lambda instance. Local URL environment variables
 such as `QUESTION_SERVICE_URL` and `QUIZ_SERVICE_URL` override SSM for tests and
 local development.
+
+## API reference
+
+The OpenAPI 3.0 specification for all four services is in
+[docs/openapi.yaml](./docs/openapi.yaml). Replace the server URLs with the
+corresponding Terraform API endpoint outputs before using Swagger UI or another
+OpenAPI client.
