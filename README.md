@@ -166,3 +166,19 @@ The OpenAPI 3.0 specification for all four services is in
 [docs/openapi.yaml](./docs/openapi.yaml). Replace the server URLs with the
 corresponding Terraform API endpoint outputs before using Swagger UI or another
 OpenAPI client.
+
+## Version history
+
+- **1.0 - Complete:** Four local services using MongoDB/Mongoose.
+- **1.1 - Core implementation complete:** DynamoDB, Lambda/API Gateway,
+  Terraform deployment, and data preservation/reseed workflows. Lifecycle
+  verification remains tracked in the roadmap; contribution guidance keeps
+  the README and roadmap synchronized.
+- **1.2 - Planned:** Student quiz discovery and account recovery.
+- **Future backlog:** Secure initial admin setup and automated live integration
+  checks.
+
+Detailed progress is tracked in [docs/PROJECT_ROADMAP.md](./docs/PROJECT_ROADMAP.md).
+Repository Copilot instructions in
+[.github/copilot-instructions.md](./.github/copilot-instructions.md) require
+updating both this README and the roadmap in the same change set.
