@@ -53,7 +53,14 @@ See the detailed infrastructure checklist in
 
 ## 1.2 - Student quiz discovery and account recovery
 
-**Status: Planned; `developing/1.2` branch not yet created**
+**Status: In progress**
+
+### Frontend foundation
+
+- [x] Scaffold a React/TypeScript Vite project under `ui/`.
+- [x] Verify the starter with `npm run build` and `npm run lint`.
+- [ ] Replace the starter screen with IQ-A UI flows and connect them to the
+  backend APIs.
 
 ### Student quiz discovery
 
